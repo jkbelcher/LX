@@ -37,6 +37,7 @@ import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.ObjectParameter;
+import uk.co.xfactorylibrarians.coremidi4j.CoreMidiDeviceInfo;
 import uk.co.xfactorylibrarians.coremidi4j.CoreMidiDeviceProvider;
 import uk.co.xfactorylibrarians.coremidi4j.CoreMidiException;
 import uk.co.xfactorylibrarians.coremidi4j.CoreMidiNotification;
@@ -383,7 +384,7 @@ public class LXMidiEngine extends LXComponent implements LXOscComponent {
         if ((existingInput == null) && (existingOutput == null)) {
           try {
             final MidiDevice device = MidiSystem.getMidiDevice(deviceInfo);
-            String deviceName = getDeviceName(deviceInfo);
+            String deviceName = getDeviceNameUnique(deviceInfo);
             if (device.getMaxTransmitters() != 0) {
               LXMidiInput input = findInput(deviceName);
               if (input != null) {
@@ -490,6 +491,14 @@ public class LXMidiEngine extends LXComponent implements LXOscComponent {
     String name = deviceInfo.getName();
     if (name.indexOf(COREMIDI4J_HEADER) == 0) {
       name = name.substring(COREMIDI4J_HEADER.length());
+    }
+    return name;
+  }
+
+  public static String getDeviceNameUnique(MidiDevice.Info deviceInfo) {
+    String name = getDeviceName(deviceInfo);
+    if (deviceInfo instanceof CoreMidiDeviceInfo) {
+      name += ((CoreMidiDeviceInfo) deviceInfo).getdeviceUniqueID();
     }
     return name;
   }
@@ -617,7 +626,7 @@ public class LXMidiEngine extends LXComponent implements LXOscComponent {
 
   private <T extends LXMidiDevice> T matchDevice(List<T> devices, String[] names) {
     for (T device : devices) {
-      String deviceName = device.getName();
+      String deviceName = device.getNameUnique();
       for (String name : names) {
         if (deviceName.contains(name)) {
           return device;
@@ -628,7 +637,7 @@ public class LXMidiEngine extends LXComponent implements LXOscComponent {
   }
 
   private LXMidiOutput findOutput(LXMidiInput input) {
-    return findDevice(this.mutableOutputs, input.getName());
+    return findDevice(this.mutableOutputs, input.getNameUnique());
   }
 
   public LXMidiOutput findOutput(String name) {
@@ -641,7 +650,7 @@ public class LXMidiEngine extends LXComponent implements LXOscComponent {
 
   private <T extends LXMidiDevice> T findDevice(List<T> devices, String name) {
     for (T device : devices) {
-      if (device.getName().equals(name)) {
+      if (device.getNameUnique().equals(name)) {
         return device;
       }
     }
