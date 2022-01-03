@@ -108,6 +108,13 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
     new BooleanParameter("Cue", false)
     .setDescription("Toggles the channel CUE state, determining whether it is shown in the preview window");
 
+  /**
+   * Whether this channel should show in the second cue UI in performance mode.
+   */
+  public final BooleanParameter cueAuxActive =
+    new BooleanParameter("CueAux", false)
+    .setDescription("Toggles the channel CUE AUX state, determining whether it is shown in the auxiliary preview window in performance mode");
+
   public final CompoundParameter fader =
     new CompoundParameter("Fader", 1)
     .setDescription("Sets the alpha level of the output of this channel");
@@ -209,6 +216,7 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
 
     addParameter("enabled", this.enabled);
     addParameter("cue", this.cueActive);
+    addParameter("cueAux", this.cueAuxActive);
     addParameter("fader", this.fader);
     addParameter("crossfadeGroup", this.crossfadeGroup);
     addParameter("blendMode", this.blendMode);
@@ -284,6 +292,14 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
           this.lx.engine.mixer.setFocusedChannel(this);
         }
       }
+    } else if (p == this.cueAuxActive) {
+      if (this.cueAuxActive.isOn()) {
+        this.lx.engine.mixer.cueA.setValue(false);
+        this.lx.engine.mixer.cueB.setValue(false);
+        if (this.lx.flags.focusChannelOnCue) {
+          this.lx.engine.mixer.setFocusedChannelAux(this);
+        }
+      }
     } else if (p == this.blendMode) {
       this.activeBlend.onInactive();
       this.activeBlend = this.blendMode.getObject();
@@ -322,7 +338,7 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
 
   private boolean isAnimating() {
     // Cue is active? We must loop to preview ourselves
-    if (this.cueActive.isOn()) {
+    if (this.cueActive.isOn() || this.cueAuxActive.isOn()) {
       return true;
     }
     // We're not active? Then we're disabled for sure

@@ -72,6 +72,10 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     new BooleanParameter("Show CPU Load %")
     .setDescription("Whether CPU load percentage is shown in toolbar");
 
+  public final BooleanParameter performanceMode =
+    new BooleanParameter("Performance Mode", true)
+    .setDescription("When true, Performance Mode enables control over two channels and an auxiliary UI visualizer");
+
   private String projectFileName = null;
   private String scheduleFileName = null;
 
@@ -90,6 +94,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     this.showHelpBar.addListener(this);
     this.schedulerEnabled.addListener(this);
     this.showCpuLoad.addListener(this);
+    this.performanceMode.addListener(this);
 
     lx.registry.addListener(new LXRegistry.Listener() {
       @Override
@@ -153,6 +158,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   private static final String KEY_SCHEDULER_ENABLED = "schedulerEnabled";
   private static final String KEY_SHOW_CPU_LOAD = "showCpuLoad";
   private static final String KEY_REGISTRY = "registry";
+  private static final String KEY_PERFORMANCE_MODE = "performanceMode";
 
   @Override
   public void save(LX lx, JsonObject object) {
@@ -172,6 +178,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     object.addProperty(KEY_SHOW_HELP_BAR, this.showHelpBar.isOn());
     object.addProperty(KEY_SCHEDULER_ENABLED, this.schedulerEnabled.isOn());
     object.addProperty(KEY_SHOW_CPU_LOAD, this.showCpuLoad.isOn());
+    object.addProperty(KEY_PERFORMANCE_MODE, this.performanceMode.isOn());
 
     object.add(KEY_REGISTRY, LXSerializable.Utils.toObject(this.lx, this.lx.registry));
   }
@@ -185,6 +192,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     LXSerializable.Utils.loadBoolean(this.schedulerEnabled, object, KEY_SCHEDULER_ENABLED);
     LXSerializable.Utils.loadBoolean(this.showCpuLoad, object, KEY_SHOW_CPU_LOAD);
     LXSerializable.Utils.loadInt(this.uiZoom, object, KEY_UI_ZOOM);
+    LXSerializable.Utils.loadBoolean(this.performanceMode, object, KEY_PERFORMANCE_MODE);
     if (object.has(KEY_WINDOW_WIDTH)) {
       this.windowWidth = object.get(KEY_WINDOW_WIDTH).getAsInt();
     }

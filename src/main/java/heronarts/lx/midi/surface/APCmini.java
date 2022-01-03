@@ -613,14 +613,6 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
     }
   }
 
-  private void clearGrid() {
-    sendNoteOn(MIDI_CHANNEL, TOGGLE_CLIPS, LED_OFF);
-    sendNoteOn(MIDI_CHANNEL, TOGGLE_PARAMETERS, LED_OFF);
-    for (int i = 0; i < NUM_CHANNELS; ++i) {
-      sendChannelPatterns(i, null);
-    }
-  }
-
   private void sendChannelPatterns(int index, LXAbstractChannel channelBus) {
     if (index >= CLIP_LAUNCH_COLUMNS) {
       return;
@@ -708,12 +700,6 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
     }
   }
 
-  private void clearChannelButtonRow() {
-    for (int i = 0; i < NUM_CHANNELS; ++i) {
-      sendNoteOn(MIDI_CHANNEL, CHANNEL_BUTTON + i, LED_OFF);
-    }
-  }
-
   private void sendChannelButton(int index, LXAbstractChannel channel) {
     if (this.shiftOn) {
       // Shift
@@ -758,6 +744,20 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
       } else {
         sendNoteOn(MIDI_CHANNEL, CHANNEL_BUTTON + index, LED_OFF);
       }
+    }
+  }
+
+  private void clearSurface() {
+    // Grid
+    sendNoteOn(MIDI_CHANNEL, TOGGLE_CLIPS, LED_OFF);
+    sendNoteOn(MIDI_CHANNEL, TOGGLE_PARAMETERS, LED_OFF);
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      sendChannelPatterns(i, null);
+    }
+
+    // Channel Button Row
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+      sendNoteOn(MIDI_CHANNEL, CHANNEL_BUTTON + i, LED_OFF);
     }
   }
 
@@ -818,8 +818,7 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
     this.lx.engine.mixer.removeListener(this.mixerEngineListener);
     this.lx.engine.mixer.focusedChannel.removeListener(this.focusedChannelListener);
 
-    clearGrid();
-    clearChannelButtonRow();
+    clearSurface();
   }
 
   private void registerChannel(LXAbstractChannel channel) {
@@ -879,7 +878,7 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
               this.deviceListener.registerPrevious();
             } else {
               this.lx.engine.mixer.focusedChannel.decrement(false);
-              lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
+              this.lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
             }
             return;
           case SELECT_RIGHT:
@@ -887,7 +886,7 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
               this.deviceListener.registerNext();
             } else {
               this.lx.engine.mixer.focusedChannel.increment(false);
-              lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
+              this.lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
             }
             return;
           case SELECT_UP:
@@ -1005,7 +1004,7 @@ public class APCmini extends LXMidiSurface implements LXMidiSurface.Bidirectiona
             switch (this.channelButtonMode) {
             case FOCUS:
               this.lx.engine.mixer.focusedChannel.setValue(channel.getIndex());
-              lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
+              this.lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
               break;
             case ENABLED:
               channel.enabled.toggle();

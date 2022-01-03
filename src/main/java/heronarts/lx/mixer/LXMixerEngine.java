@@ -87,6 +87,10 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new DiscreteParameter("Channel", 1)
     .setDescription("Which channel is currently focused in the UI");
 
+  public final DiscreteParameter focusedChannelAux =
+    new DiscreteParameter("ChannelAux", 1)
+    .setDescription("Which channel has the auxiliary focus in the UI in Performance mode");
+
   public final CompoundParameter crossfader = new CompoundParameter("Crossfader", 0.5)
   .setDescription("Applies blending between output groups A and B")
   .setPolarity(LXParameter.Polarity.BIPOLAR);
@@ -189,6 +193,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     addParameter("crossfader", this.crossfader);
     addParameter("crossfaderBlendMode", this.crossfaderBlendMode);
     addParameter("focusedChannel", this.focusedChannel);
+    addParameter("focusedChannelAux", this.focusedChannelAux);
     addParameter("cueA", this.cueA);
     addParameter("cueB", this.cueB);
     addParameter("viewCondensed", this.viewCondensed);
@@ -207,6 +212,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         this.cueB.setValue(false);
         for (LXAbstractChannel channel : this.channels) {
           channel.cueActive.setValue(false);
+          channel.cueAuxActive.setValue(false);
         }
       }
     } else if (this.cueB == p) {
@@ -214,6 +220,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         this.cueA.setValue(false);
         for (LXAbstractChannel channel : this.channels) {
           channel.cueActive.setValue(false);
+          channel.cueAuxActive.setValue(false);
         }
       }
     } else if (this.focusedChannel == p) {
@@ -396,11 +403,27 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     return getChannel(this.focusedChannel.getValuei());
   }
 
+  public LXBus getFocusedChannelAux() {
+    if (this.focusedChannelAux.getValuei() == this.mutableChannels.size()) {
+      return this.masterBus;
+    }
+    return getChannel(this.focusedChannelAux.getValuei());
+  }
+
   public LXMixerEngine setFocusedChannel(LXBus channel) {
     if (channel == this.masterBus) {
       this.focusedChannel.setValue(this.mutableChannels.size());
     } else {
       this.focusedChannel.setValue(this.mutableChannels.indexOf(channel));
+    }
+    return this;
+  }
+
+  public LXMixerEngine setFocusedChannelAux(LXBus channel) {
+    if (channel == this.masterBus) {
+      this.focusedChannelAux.setValue(this.mutableChannels.size());
+    } else {
+      this.focusedChannelAux.setValue(this.mutableChannels.indexOf(channel));
     }
     return this;
   }
@@ -618,6 +641,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     channel.setMixer(this);
     this.mutableChannels.add(index, channel);
     this.focusedChannel.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelAux.setRange(this.mutableChannels.size() + 1);
     for (Listener listener : this.listeners) {
       listener.channelAdded(this, channel);
     }
@@ -672,13 +696,22 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     _reindexChannels();
 
     boolean notified = false;
+    boolean notifiedAux = false;
     if (this.focusedChannel.getValuei() > this.mutableChannels.size()) {
       notified = true;
       this.focusedChannel.decrement();
     }
+    if (this.focusedChannelAux.getValuei() > this.mutableChannels.size()) {
+      notifiedAux = true;
+      this.focusedChannelAux.decrement();
+    }
     this.focusedChannel.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelAux.setRange(this.mutableChannels.size() + 1);
     if (!notified) {
       this.focusedChannel.bang();
+    }
+    if (!notifiedAux) {
+      this.focusedChannelAux.bang();
     }
     for (Listener listener : this.listeners) {
       listener.channelRemoved(this, channel);
@@ -837,6 +870,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
   private final BlendStack blendStackMain = new BlendStack();
   private final BlendStack blendStackCue = new BlendStack();
+  private final BlendStack blendStackCueAux = new BlendStack();
   private final BlendStack blendStackLeft = new BlendStack();
   private final BlendStack blendStackRight = new BlendStack();
 
@@ -846,6 +880,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Initialize blend stacks
     this.blendStackMain.initialize(this.backgroundBlack.getArray(), render.getMain());
     this.blendStackCue.initialize(this.backgroundBlack.getArray(), render.getCue());
+    this.blendStackCueAux.initialize(this.backgroundBlack.getArray(), render.getCueAux());
     this.blendStackLeft.initialize(this.backgroundBlack.getArray(), this.blendBufferLeft.getArray());
     this.blendStackRight.initialize(this.backgroundBlack.getArray(), this.blendBufferRight.getArray());
 
@@ -854,6 +889,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     boolean leftBusActive = crossfadeValue < 1.;
     boolean rightBusActive = crossfadeValue > 0.;
     boolean cueBusActive = false;
+    boolean cueAuxBusActive = false;
 
     boolean isChannelMultithreaded = this.lx.engine.isChannelMultithreaded.isOn();
 
@@ -955,6 +991,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         cueBusActive = true;
         this.blendStackCue.blend(this.addBlend, channel.getColors(), 1, channel.getModelView());
       }
+      // Only blend auxiliary cue in performance mode
+      if (channel.cueAuxActive.isOn() && this.lx.preferences.performanceMode.isOn()) {
+        cueAuxBusActive = true;
+        this.blendStackCueAux.blend(this.addBlend, channel.getColors(), 1, channel.getModelView());
+      }
 
       ((LXAbstractChannel.Profiler) channel.profiler).blendNanos = System.nanoTime() - blendStart;
     }
@@ -999,6 +1040,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
     // Mark the cue active state of the buffer
     render.setCueOn(cueBusActive);
+    render.setCueAuxOn(cueAuxBusActive);
   }
 
   private static final String KEY_CHANNELS = "channels";

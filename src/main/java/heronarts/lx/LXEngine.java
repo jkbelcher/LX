@@ -208,7 +208,9 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     private LXModel model;
     private int[] main = null;
     private int[] cue = null;
+    private int[] cueAux = null;
     private boolean cueOn = false;
+    private boolean cueAuxOn = false;
 
     public Frame(LX lx) {
       setModel(lx.getModel());
@@ -219,6 +221,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       if ((this.main == null) || (this.main.length != model.size)) {
         this.main = new int[model.size];
         this.cue = new int[model.size];
+        this.cueAux = new int[model.size];
       }
     }
 
@@ -226,15 +229,25 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       this.cueOn = cueOn;
     }
 
+    public void setCueAuxOn(boolean cueAuxOn) {
+      this.cueAuxOn = cueAuxOn;
+    }
+
     public void copyFrom(Frame that) {
       setModel(that.model);
       this.cueOn = that.cueOn;
+      this.cueAuxOn = that.cueAuxOn;
       System.arraycopy(that.main, 0, this.main, 0, this.main.length);
       System.arraycopy(that.cue, 0, this.cue, 0, this.cue.length);
+      System.arraycopy(that.cueAux, 0, this.cueAux, 0, this.cueAux.length);
     }
 
     public int[] getColors() {
       return this.cueOn ? this.cue : this.main;
+    }
+
+    public int[] getColorsAux() {
+      return this.cueAuxOn ? this.cueAux : this.main;
     }
 
     public LXModel getModel() {
@@ -252,6 +265,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     public int[] getCue() {
       return this.cue;
+    }
+
+    public int[] getCueAux() {
+      return this.cueAux;
     }
   }
 
@@ -1050,6 +1067,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
           for (int i = start; i < end; ++i) {
             this.buffer.render.main[i] = LXColor.BLACK;
             this.buffer.render.cue[i] = LXColor.BLACK;
+            this.buffer.render.cueAux[i] = LXColor.BLACK;
           }
         }
       } else if (fixture.identify.isOn()) {
@@ -1059,6 +1077,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
           for (int i = start; i < end; ++i) {
             this.buffer.render.main[i] = identifyColor;
             this.buffer.render.cue[i] = identifyColor;
+            this.buffer.render.cueAux[i] = identifyColor;
           }
         }
       }
@@ -1070,6 +1089,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
             if (i < start || i >= end) {
               this.buffer.render.main[i] = LXColor.BLACK;
               this.buffer.render.cue[i] = LXColor.BLACK;
+              this.buffer.render.cueAux[i] = LXColor.BLACK;
             }
           }
         }
@@ -1098,7 +1118,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
         // Or do it ourself here on the engine thread
         long outputStart = System.nanoTime();
         Frame sendFrame = isDoubleBuffering ? this.buffer.copy : this.buffer.render;
-        int[] sendColors = (this.lx.flags.sendCueToOutput && sendFrame.cueOn) ? sendFrame.cue : sendFrame.main;
+        int[] sendColors = (this.lx.flags.sendCueToOutput && (sendFrame.cueOn || sendFrame.cueAuxOn)) ? (sendFrame.cueOn ? sendFrame.cue : sendFrame.cueAux) : sendFrame.main;
         this.output.send(sendColors);
         this.profiler.outputNanos = System.nanoTime() - outputStart;
       }
