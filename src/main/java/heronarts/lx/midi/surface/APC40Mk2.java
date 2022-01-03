@@ -38,6 +38,7 @@ import heronarts.lx.mixer.LXAbstractChannel;
 import heronarts.lx.mixer.LXGroup;
 import heronarts.lx.mixer.LXMixerEngine;
 import heronarts.lx.parameter.CompoundParameter;
+import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXListenableNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
@@ -46,6 +47,19 @@ import heronarts.lx.pattern.LXPattern;
 public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirectional {
 
   public static final String DEVICE_NAME = "APC40 mkII";
+
+  public enum APCMode {
+    NORMAL,
+    TWOPLAYER
+  }
+
+  public final EnumParameter<APCMode> mode =
+    new EnumParameter<APCMode>("Mode", APCMode.TWOPLAYER)
+    .setDescription("TwoPlayer mode changes the behavior of Selected Channel, Solo, and Cue buttons.");
+
+  private APCMode getMode() {
+    return mode.getEnum();
+  }
 
   public static final byte GENERIC_MODE = 0x40;
   public static final byte ABLETON_MODE = 0x41;
@@ -281,7 +295,9 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
           (this.channel instanceof LXChannel) &&
           (parameter == ((LXChannel)this.channel).focusedPattern)) {
         if ((this.device == null) || (this.device instanceof LXPattern)) {
+          if (getMode() == APCMode.NORMAL) {
           register(((LXChannel) this.channel).getFocusedPattern());
+          }
         }
       } else if ((this.effect != null) && (parameter == this.effect.enabled)) {
         sendNoteOn(0, DEVICE_ON_OFF, this.effect.enabled.isOn() ? LED_ON : LED_OFF);
@@ -410,14 +426,22 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
       }
 
       if (p == this.channel.cueActive) {
-        sendNoteOn(index, CHANNEL_SOLO, this.channel.cueActive.isOn() ? LED_ON : LED_OFF);
+        if (getMode() == APCMode.TWOPLAYER) {
+          sendNoteOn(index, CHANNEL_FOCUS, this.channel.cueActive.isOn() ? LED_ON : LED_OFF);
+        } else {
+          sendNoteOn(index, CHANNEL_SOLO, this.channel.cueActive.isOn() ? LED_ON : LED_OFF);
+        }
       } else if (p == this.channel.enabled) {
         sendNoteOn(index, CHANNEL_ACTIVE, this.channel.enabled.isOn() ? LED_ON : LED_OFF);
       } else if (p == this.channel.crossfadeGroup) {
         sendNoteOn(index, CHANNEL_CROSSFADE_GROUP, this.channel.crossfadeGroup.getValuei());
       } else if (p == this.channel.arm) {
-        sendNoteOn(index, CHANNEL_ARM, this.channel.arm.isOn() ? LED_ON : LED_OFF);
-        sendChannelClips(this.channel.getIndex(), this.channel);
+        if (getMode() == APCMode.TWOPLAYER) {
+          // Swallow
+        } else {
+          sendNoteOn(index, CHANNEL_ARM, this.channel.arm.isOn() ? LED_ON : LED_OFF);
+          sendChannelClips(this.channel.getIndex(), this.channel);
+        }
       } else if (p.getParent() instanceof LXClip) {
         LXClip clip = (LXClip)p.getParent();
         sendClip(index, this.channel, clip.getIndex(), clip);
@@ -501,6 +525,20 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
 
   public APC40Mk2(LX lx, LXMidiInput input, LXMidiOutput output) {
     super(lx, input, output);
+
+    this.mode.addListener(new LXParameterListener() {
+      @Override
+      public void onParameterChanged(LXParameter parameter) {
+        onModeChanged(mode.getEnum());
+      }
+    }, true);
+  }
+
+  private void onModeChanged(APCMode mode) {
+    System.out.println("APC Mode: " + mode);
+    if (isRegistered) {
+      sendChannels();
+    }
   }
 
   @Override
@@ -590,8 +628,14 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     if (channel != null) {
       sendNoteOn(index, CHANNEL_ACTIVE, channel.enabled.isOn() ? LED_ON : LED_OFF);
       sendNoteOn(index, CHANNEL_CROSSFADE_GROUP, channel.crossfadeGroup.getValuei());
-      sendNoteOn(index, CHANNEL_SOLO, channel.cueActive.isOn() ? LED_ON : LED_OFF);
-      sendNoteOn(index, CHANNEL_ARM, channel.arm.isOn() ? LED_ON : LED_OFF);
+      if (getMode() == APCMode.TWOPLAYER) {
+        sendNoteOn(index, CHANNEL_FOCUS, channel.cueActive.isOn() ? LED_ON : LED_OFF);
+        sendNoteOn(index, CHANNEL_SOLO, lx.engine.mixer.getFocusedChannelControlset1().equals(channel) ? LED_ON : LED_OFF);
+        sendNoteOn(index, CHANNEL_ARM, lx.engine.mixer.getFocusedChannelControlset2().equals(channel) ? LED_ON : LED_OFF);
+      } else {
+        sendNoteOn(index, CHANNEL_SOLO, channel.cueActive.isOn() ? LED_ON : LED_OFF);
+        sendNoteOn(index, CHANNEL_ARM, channel.arm.isOn() ? LED_ON : LED_OFF);
+      }
     } else {
       sendNoteOn(index, CHANNEL_ACTIVE, LED_OFF);
       sendNoteOn(index, CHANNEL_CROSSFADE_GROUP, LED_OFF);
@@ -681,8 +725,12 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
   private void sendChannelFocus() {
     int focusedChannel = this.lx.engine.mixer.focusedChannel.getValuei();
     boolean masterFocused = (focusedChannel == this.lx.engine.mixer.channels.size());
-    for (int i = 0; i < NUM_CHANNELS; ++i) {
-      sendNoteOn(i, CHANNEL_FOCUS, (!masterFocused && (i == focusedChannel)) ? LED_ON : LED_OFF);
+    if (getMode() == APCMode.TWOPLAYER) {
+      // Swallow
+    } else {
+      for (int i = 0; i < NUM_CHANNELS; ++i) {
+        sendNoteOn(i, CHANNEL_FOCUS, (!masterFocused && (i == focusedChannel)) ? LED_ON : LED_OFF);
+      }
     }
     sendNoteOn(0, MASTER_FOCUS, masterFocused ? LED_ON : LED_OFF);
   }
@@ -711,6 +759,18 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
   };
 
+  private final LXParameterListener focusedChannelControlset1Listener = (p) -> {
+    if (this.mode.getEnum() == APCMode.TWOPLAYER ) {
+      sendChannels();
+    }
+    };
+
+  private final LXParameterListener focusedChannelControlset2Listener = (p) -> {
+    if (this.mode.getEnum() == APCMode.TWOPLAYER ) {
+      sendChannels();
+    }
+    };
+
   private final LXParameterListener cueAListener = (p) -> {
     sendNoteOn(0, CLIP_DEVICE_VIEW, this.lx.engine.mixer.cueA.isOn() ? 1 : 0);
   };
@@ -734,6 +794,8 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
 
     this.lx.engine.mixer.addListener(this.mixerEngineListener);
     this.lx.engine.mixer.focusedChannel.addListener(this.focusedChannelListener);
+    this.lx.engine.mixer.focusedChannelControlset1.addListener(this.focusedChannelControlset1Listener);
+    this.lx.engine.mixer.focusedChannelControlset2.addListener(this.focusedChannelControlset2Listener);
 
     this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
 
@@ -751,6 +813,8 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
 
     this.lx.engine.mixer.removeListener(this.mixerEngineListener);
     this.lx.engine.mixer.focusedChannel.removeListener(this.focusedChannelListener);
+    this.lx.engine.mixer.focusedChannelControlset1.removeListener(this.focusedChannelControlset1Listener);
+    this.lx.engine.mixer.focusedChannelControlset2.removeListener(this.focusedChannelControlset2Listener);
     this.lx.engine.mixer.cueA.removeListener(this.cueAListener);
     this.lx.engine.mixer.cueB.removeListener(this.cueBListener);
     this.lx.engine.tempo.enabled.removeListener(this.tempoListener);
@@ -781,6 +845,23 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     return getChannel(message.getChannel());
   }
 
+  private void cueChannel(LXAbstractChannel channel, boolean on) {
+    channel.cueActive.setValue(on);
+    // JKB Hack: cue only one channel at a time
+    if (on)
+    {
+      uncueOtherChannels(channel);
+    }
+  }
+
+  private void uncueOtherChannels(LXAbstractChannel channel) {
+    for (LXAbstractChannel chan : this.lx.engine.mixer.channels) {
+      if (!chan.equals(channel) && chan.cueActive.getValueb()) {
+        chan.cueActive.setValue(false);
+      }
+    }
+  }
+
   private void noteReceived(MidiNote note, boolean on) {
     int pitch = note.getPitch();
 
@@ -790,10 +871,16 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
       this.shiftOn = on;
       return;
     case BANK:
-      if (on) {
-        this.bankOn = !this.bankOn;
-        sendNoteOn(note.getChannel(), pitch, this.bankOn ? LED_ON : LED_OFF);
-        sendChannelGrid();
+      if (this.shiftOn) {
+        if (on) {
+          this.mode.increment();
+        }
+      } else {
+        if (on) {
+          this.bankOn = !this.bankOn;
+          sendNoteOn(note.getChannel(), pitch, this.bankOn ? LED_ON : LED_OFF);
+          sendChannelGrid();
+        }
       }
       return;
     case METRONOME:
@@ -909,13 +996,35 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
       }
       switch (note.getPitch()) {
       case CHANNEL_ARM:
-        channel.arm.toggle();
+        if (getMode() == APCMode.TWOPLAYER) {
+          if (on) { // ***Might not need this
+            lx.engine.mixer.setFocusedChannelControlset2(channel);
+            // JKB note: Keeping this associated behavior in APC40MkII class for now to localize the changes.
+            if (lx.preferences.focusChannelOnCue.getValueb()) {
+              cueChannel(channel, true);
+            }
+          }
+        } else {
+          // Normal mode
+          channel.arm.toggle();
+        }
         return;
       case CHANNEL_ACTIVE:
         channel.enabled.toggle();
         return;
       case CHANNEL_SOLO:
-        channel.cueActive.toggle();
+        if (getMode() == APCMode.TWOPLAYER) {
+          if (on) { // **Might not need this.  Might want to focus even if selected.
+            lx.engine.mixer.setFocusedChannelControlset1(channel);
+            // JKB note: Keeping this associated behavior in APC40MkII class for now to localize the changes.
+            if (lx.preferences.focusChannelOnCue.getValueb()) {
+              cueChannel(channel, true);
+            }
+          }
+        } else {
+          // Normal mode
+          cueChannel(channel, !channel.cueActive.getValueb());
+        }
         return;
       case CHANNEL_CROSSFADE_GROUP:
         if (this.shiftOn) {
@@ -928,13 +1037,19 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
         channel.stopClips();
         return;
       case CHANNEL_FOCUS:
-        if (this.shiftOn) {
-          if (channel instanceof LXChannel) {
-            ((LXChannel) channel).autoCycleEnabled.toggle();
-          }
+        if (getMode() == APCMode.TWOPLAYER) {
+          // In TwoPlayer mode, Channel Focus is cue
+          cueChannel(channel, !channel.cueActive.getValueb());
         } else {
-          this.lx.engine.mixer.focusedChannel.setValue(channel.getIndex());
-          lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
+          // Normal mode
+          if (this.shiftOn) {
+            if (channel instanceof LXChannel) {
+              ((LXChannel) channel).autoCycleEnabled.toggle();
+            }
+          } else {
+            this.lx.engine.mixer.focusedChannel.setValue(channel.getIndex());
+            lx.engine.mixer.selectChannel(lx.engine.mixer.getFocusedChannel());
+          }
         }
         return;
       case DEVICE_ON_OFF:

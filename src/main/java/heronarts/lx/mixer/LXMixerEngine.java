@@ -87,6 +87,14 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new DiscreteParameter("Channel", 1)
     .setDescription("Which channel is currently focused in the UI");
 
+  public final DiscreteParameter focusedChannelControlset1 =
+    new DiscreteParameter("ChannelControlset1", 1)
+    .setDescription("Which channel has focus of control set 1");
+
+  public final DiscreteParameter focusedChannelControlset2 =
+    new DiscreteParameter("ChannelControlset2", 1)
+    .setDescription("Which channel has focus of control set 2");
+
   public final CompoundParameter crossfader = new CompoundParameter("Crossfader", 0.5)
   .setDescription("Applies blending between output groups A and B")
   .setPolarity(LXParameter.Polarity.BIPOLAR);
@@ -396,11 +404,43 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     return getChannel(this.focusedChannel.getValuei());
   }
 
+  public LXBus getFocusedChannelControlset1() {
+    if (this.focusedChannelControlset1.getValuei() == this.mutableChannels.size()) {
+      return this.masterBus;
+    }
+    return getChannel(this.focusedChannelControlset1.getValuei());
+  }
+
+  public LXBus getFocusedChannelControlset2() {
+    if (this.focusedChannelControlset2.getValuei() == this.mutableChannels.size()) {
+      return this.masterBus;
+    }
+    return getChannel(this.focusedChannelControlset2.getValuei());
+  }
+
   public LXMixerEngine setFocusedChannel(LXBus channel) {
     if (channel == this.masterBus) {
       this.focusedChannel.setValue(this.mutableChannels.size());
     } else {
       this.focusedChannel.setValue(this.mutableChannels.indexOf(channel));
+    }
+    return this;
+  }
+
+  public LXMixerEngine setFocusedChannelControlset1(LXBus channel) {
+    if (channel == this.masterBus) {
+      this.focusedChannelControlset1.setValue(this.mutableChannels.size());
+    } else {
+      this.focusedChannelControlset1.setValue(this.mutableChannels.indexOf(channel));
+    }
+    return this;
+  }
+
+  public LXMixerEngine setFocusedChannelControlset2(LXBus channel) {
+    if (channel == this.masterBus) {
+      this.focusedChannelControlset2.setValue(this.mutableChannels.size());
+    } else {
+      this.focusedChannelControlset2.setValue(this.mutableChannels.indexOf(channel));
     }
     return this;
   }
@@ -618,6 +658,8 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     channel.setMixer(this);
     this.mutableChannels.add(index, channel);
     this.focusedChannel.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelControlset1.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelControlset2.setRange(this.mutableChannels.size() + 1);
     for (Listener listener : this.listeners) {
       listener.channelAdded(this, channel);
     }
@@ -672,13 +714,31 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     _reindexChannels();
 
     boolean notified = false;
+    boolean notifiedControlset1 = false;
+    boolean notifiedControlset2 = false;
     if (this.focusedChannel.getValuei() > this.mutableChannels.size()) {
       notified = true;
       this.focusedChannel.decrement();
     }
+    if (this.focusedChannelControlset1.getValuei() > this.mutableChannels.size()) {
+      notifiedControlset1 = true;
+      this.focusedChannelControlset1.decrement();
+    }
+    if (this.focusedChannelControlset2.getValuei() > this.mutableChannels.size()) {
+      notifiedControlset2 = true;
+      this.focusedChannelControlset2.decrement();
+    }
     this.focusedChannel.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelControlset1.setRange(this.mutableChannels.size() + 1);
+    this.focusedChannelControlset2.setRange(this.mutableChannels.size() + 1);
     if (!notified) {
       this.focusedChannel.bang();
+    }
+    if (!notifiedControlset1) {
+      this.focusedChannelControlset1.bang();
+    }
+    if (!notifiedControlset2) {
+      this.focusedChannelControlset2.bang();
     }
     for (Listener listener : this.listeners) {
       listener.channelRemoved(this, channel);

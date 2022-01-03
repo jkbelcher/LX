@@ -36,6 +36,7 @@ import heronarts.lx.modulation.LXCompoundModulation;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
+import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXListenableNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
@@ -60,13 +61,21 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
    *   Encoder MIDI Type: CC
    *   Encoder Switch MIDI Settings:
    *     Switch MIDI Channel: 2
-   *     Switch MIDI Number: 6
    *   Encoder Rotary MIDI Settings:
    *     Encoder MIDI Channel: 1
-   *     Encoder MIDI Number: 6
    */
 
   public static final String DEVICE_NAME = "Midi Fighter Twister";
+
+  public enum MFTMode {
+    SELECTED,
+    CONTROLSET1,
+    CONTROLSET2
+  }
+
+  public final EnumParameter<MFTMode> mode =
+    new EnumParameter<MFTMode>("Mode", MFTMode.SELECTED)
+    .setDescription("Choose an MFT Mode to track your desired focus target on the LXMixer. SELECTED is the default, which tracks the keyboard focus.");
 
   // MIDI Channels
   public static final int CHANNEL_ROTARY_ENCODER = 0;
@@ -190,6 +199,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
     }
 
     private void resend() {
+      int knobColor = getKnobColor();
       for (int i = 0; i < this.knobs.length; ++i) {
         LXListenableNormalizedParameter parameter = this.knobs[i];
         if (parameter != null) {
@@ -201,7 +211,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
             parameter.getNormalized();
           sendControlChange(CHANNEL_ROTARY_ENCODER, DEVICE_KNOB + i, (int) (normalized * 127));
           sendControlChange(CHANNEL_ANIMATIONS_AND_BRIGHTNESS, DEVICE_KNOB + i, RGB_BRIGHTNESS_MAX);
-          sendControlChange(CHANNEL_SWITCH_AND_COLOR, DEVICE_KNOB + i, 50);
+          sendControlChange(CHANNEL_SWITCH_AND_COLOR, DEVICE_KNOB + i, knobColor);
         } else {
           sendControlChange(CHANNEL_ANIMATIONS_AND_BRIGHTNESS, DEVICE_KNOB + i, RGB_ANIMATION_NONE);
           sendControlChange(CHANNEL_ANIMATIONS_AND_BRIGHTNESS, DEVICE_KNOB + i, INDICATOR_ANIMATION_NONE);
@@ -249,6 +259,18 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
       }
     }
 
+    private int getKnobColor() {
+      switch (mode.getEnum()) {
+      case CONTROLSET1:
+        return 1;
+      case CONTROLSET2:
+        return 80;
+      case SELECTED:
+      default:
+        return 50;
+      }
+    }
+
     private void register(LXDeviceComponent device) {
       if (this.device != device) {
         unregister();
@@ -262,6 +284,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
 
         int i = 0;
         if (this.device != null) {
+          int knobColor = getKnobColor();
           for (LXListenableNormalizedParameter parameter : this.device.getRemoteControls()) {
             if (i >= this.knobs.length) {
               break;
@@ -298,6 +321,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
               sendControlChange(CHANNEL_ROTARY_ENCODER, DEVICE_KNOB+i, 0);
               sendControlChange(CHANNEL_ANIMATIONS_AND_BRIGHTNESS, DEVICE_KNOB + i, RGB_BRIGHTNESS_OFF);
             }
+            sendControlChange(CHANNEL_SWITCH_AND_COLOR, DEVICE_KNOB + i, knobColor);
             ++i;
           }
           this.device.controlSurfaceSemaphore.increment();
@@ -405,8 +429,29 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
     this.currentBank.setValue(bank);
   }
 
+  private void incrementMode() {
+    this.mode.increment();
+  }
+
+  private void decrementMode() {
+    this.mode.decrement();
+  }
+
   public MidiFighterTwister(LX lx, LXMidiInput input, LXMidiOutput output) {
       super(lx, input, output);
+
+      this.mode.addListener(new LXParameterListener() {
+        @Override
+        public void onParameterChanged(LXParameter parameter) {
+          onModeChanged(mode.getEnum());
+        }
+      });
+  }
+
+  private void onModeChanged(MFTMode mode) {
+    System.out.println("MFT Mode: " + mode);
+    registerChannelByMode();
+    this.deviceListener.resend();
   }
 
   @Override
@@ -452,7 +497,21 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
   }
 
   private final LXParameterListener focusedChannelListener = (p) -> {
-    this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
+    if (this.mode.getEnum() == MFTMode.SELECTED ) {
+      this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
+    }
+    };
+
+  private final LXParameterListener focusedChannelControlset1Listener = (p) -> {
+    if (this.mode.getEnum() == MFTMode.CONTROLSET1 ) {
+      this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannelControlset1());
+    }
+    };
+
+  private final LXParameterListener focusedChannelControlset2Listener = (p) -> {
+    if (this.mode.getEnum() == MFTMode.CONTROLSET2 ) {
+      this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannelControlset2());
+    }
     };
 
   private boolean isRegistered = false;
@@ -461,14 +520,33 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
     isRegistered = true;
 
     this.lx.engine.mixer.focusedChannel.addListener(this.focusedChannelListener);
+    this.lx.engine.mixer.focusedChannelControlset1.addListener(this.focusedChannelControlset1Listener);
+    this.lx.engine.mixer.focusedChannelControlset2.addListener(this.focusedChannelControlset2Listener);
 
-    this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
+    registerChannelByMode();
+  }
+
+  private void registerChannelByMode() {
+    switch (this.mode.getEnum()) {
+      case CONTROLSET1:
+        this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannelControlset1());
+        return;
+      case CONTROLSET2:
+        this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannelControlset2());
+        return;
+      case SELECTED:
+      default:
+        this.deviceListener.registerChannel(this.lx.engine.mixer.getFocusedChannel());
+        return;
+    }
   }
 
   private void unregister() {
     isRegistered = false;
 
     this.lx.engine.mixer.focusedChannel.removeListener(this.focusedChannelListener);
+    this.lx.engine.mixer.focusedChannelControlset1.removeListener(this.focusedChannelControlset1Listener);
+    this.lx.engine.mixer.focusedChannelControlset2.removeListener(this.focusedChannelControlset2Listener);
   }
 
   @Override
@@ -512,30 +590,34 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
                 updateBank(number);
             return;
           case BANK1_LEFT1:
-          case BANK1_LEFT2:
-          case BANK1_LEFT3:
           case BANK2_LEFT1:
-          case BANK2_LEFT2:
-          case BANK2_LEFT3:
           case BANK3_LEFT1:
-          case BANK3_LEFT2:
-          case BANK3_LEFT3:
           case BANK4_LEFT1:
+            this.decrementMode();
+            return;
+          case BANK1_RIGHT1:
+          case BANK2_RIGHT1:
+          case BANK3_RIGHT1:
+          case BANK4_RIGHT1:
+            this.incrementMode();
+            return;
+          case BANK1_LEFT2:
+          case BANK2_LEFT2:
+          case BANK3_LEFT2:
           case BANK4_LEFT2:
+          case BANK1_LEFT3:
+          case BANK2_LEFT3:
+          case BANK3_LEFT3:
           case BANK4_LEFT3:
             this.deviceListener.registerPrevious();
             return;
-          case BANK1_RIGHT1:
           case BANK1_RIGHT2:
-          case BANK1_RIGHT3:
-          case BANK2_RIGHT1:
           case BANK2_RIGHT2:
-          case BANK2_RIGHT3:
-          case BANK3_RIGHT1:
           case BANK3_RIGHT2:
-          case BANK3_RIGHT3:
-          case BANK4_RIGHT1:
           case BANK4_RIGHT2:
+          case BANK1_RIGHT3:
+          case BANK2_RIGHT3:
+          case BANK3_RIGHT3:
           case BANK4_RIGHT3:
             this.deviceListener.registerNext();
             return;
