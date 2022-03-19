@@ -812,7 +812,9 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     }
     sendChannels();
     this.cueDown = 0;
+    this.cueAuxDown = 0;
     this.singleCueStartedOn = false;
+    this.singleCueAuxStartedOn = false;
     sendPerformanceMode();
   }
 
@@ -1204,7 +1206,9 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
   }
 
   private int cueDown = 0;
+  private int cueAuxDown = 0;
   private boolean singleCueStartedOn = false;
+  private boolean singleCueAuxStartedOn = false;
 
   private void setFocusedChannel(LXAbstractChannel channel) {
     this.lx.engine.mixer.focusedChannel.setValue(channel.getIndex());
@@ -1460,6 +1464,7 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     LXAbstractChannel channel = getChannel(note);
 
     if (channel != null) {
+      // Primary cue
       if (note.getPitch() == CHANNEL_SOLO) {
         if (on) {
           boolean cueAlreadyOn = channel.cueActive.isOn();
@@ -1490,18 +1495,44 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
         }
         return;
       }
+      // Aux cue
+      if (note.getPitch() == CHANNEL_ARM && isPerformanceMode()) {
+        if (on) {
+          boolean cueAlreadyOn = channel.cueAuxActive.isOn();
+
+          // First cue pressed, if active, could be un-cue or start of multi-select
+          this.singleCueAuxStartedOn = (this.cueAuxDown == 0) && cueAlreadyOn;
+          if (cueAlreadyOn) {
+            if (this.cueAuxDown == 0) {
+              // Turn off all other cues on the first fresh press, leave this one on
+              this.lx.engine.mixer.enableChannelCueAux(channel, true);
+            } else {
+              channel.cueAuxActive.setValue(false);
+            }
+          } else {
+            this.lx.engine.mixer.enableChannelCueAux(channel, this.cueAuxDown == 0);
+          }
+          ++this.cueAuxDown;
+        } else {
+          // Play defense here, just in case a button was down *before* control surface mode
+          // was activated and gets released after
+          this.cueAuxDown = LXUtils.max(0, this.cueAuxDown - 1);
+
+          if (this.singleCueAuxStartedOn) {
+            // Turn this one off.  Already got the others on the cue down
+            channel.cueAuxActive.setValue(false);
+            this.singleCueAuxStartedOn = false;
+          }
+        }
+        return;
+      }
 
       if (!on) {
         return;
       }
       switch (note.getPitch()) {
       case CHANNEL_ARM:
-        if (isPerformanceMode()) {
-          cueAuxChannel(channel, !channel.cueAuxActive.getValueb());
-        } else {
-          // Normal mode
-          channel.arm.toggle();
-        }
+        channel.arm.toggle();
         return;
       case CHANNEL_ACTIVE:
         channel.enabled.toggle();
