@@ -397,14 +397,14 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
   }
 
   public LXBus getFocusedChannel() {
-    if (this.focusedChannel.getValuei() == this.mutableChannels.size()) {
+    if (this.focusedChannel.getValuei() >= this.mutableChannels.size()) {
       return this.masterBus;
     }
     return getChannel(this.focusedChannel.getValuei());
   }
 
   public LXBus getFocusedChannelAux() {
-    if (this.focusedChannelAux.getValuei() == this.mutableChannels.size()) {
+    if (this.focusedChannelAux.getValuei() >= this.mutableChannels.size()) {
       return this.masterBus;
     }
     return getChannel(this.focusedChannelAux.getValuei());
