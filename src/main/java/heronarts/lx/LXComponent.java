@@ -662,6 +662,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
         ((ColorParameter) parameter).setColor(message.getInt());
       }
     } else if (parameter instanceof DiscreteParameter) {
+      LXNormalizedParameter normalizedParameter = (LXNormalizedParameter) parameter;
       OscArgument arg = message.get();
       if ((arg instanceof OscInt) || ((DiscreteParameter) parameter).getOscMode() == LXNormalizedParameter.OscMode.ABSOLUTE) {
         parameter.setValue(arg.toInt());

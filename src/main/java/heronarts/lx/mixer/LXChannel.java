@@ -221,8 +221,9 @@ public class LXChannel extends LXAbstractChannel {
 
     this.renderBuffer = new ModelBuffer(lx);
 
-    this.focusedPattern =
+    this.focusedPattern = (DiscreteParameter)
       new DiscreteParameter("Focused Pattern", 0, Math.max(1, patterns.length))
+      .setOscMode(BoundedParameter.OscMode.ABSOLUTE)
       .setDescription("Which pattern has focus in the UI");
 
     this.transitionBlendMode = new ObjectParameter<LXBlend>("Transition Blend", new LXBlend[1])

@@ -47,6 +47,7 @@ import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.ObjectParameter;
+import heronarts.lx.parameter.LXNormalizedParameter.OscMode;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.utils.LXUtils;
 
@@ -90,8 +91,9 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
   private final AddBlend addBlend;
 
-  public final DiscreteParameter focusedChannel =
+  public final DiscreteParameter focusedChannel = (DiscreteParameter)
     new DiscreteParameter("Channel", 1)
+    .setOscMode(OscMode.ABSOLUTE)
     .setDescription("Which channel is currently focused in the UI");
 
   public final DiscreteParameter focusedChannelAux =
