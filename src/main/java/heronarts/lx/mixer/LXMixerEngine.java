@@ -123,6 +123,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new BooleanParameter("Aux-B", false)
     .setDescription("Enables aux preview of crossfade group B");
 
+  // HACK FOR OSC COLLECTION COUNT
+  public final DiscreteParameter channelCount =
+    new DiscreteParameter("Number of items in collection", 0, 0, 300)
+    .setDescription("Collection count for OSC development.  Sorry! :grimacing face:");
+
   final ModelBuffer backgroundBlack;
   final ModelBuffer backgroundTransparent;
   private final ModelBuffer blendBufferLeft;
@@ -204,6 +209,8 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     addParameter("auxA", this.auxA);
     addParameter("auxB", this.auxB);
     addParameter("viewCondensed", this.viewCondensed);
+    // HACK FOR OSC COLLECTION COUNT
+    addParameter("count", this.channelCount);
   }
 
   @Override
@@ -629,6 +636,9 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     for (LXAbstractChannel channelBus : this.mutableChannels) {
       channelBus.setIndex(i++);
     }
+
+    // HACK FOR OSC COLLECTION COUNT
+    this.channelCount.setValue(this.mutableChannels.size());
   }
 
   public void removeSelectedChannels() {

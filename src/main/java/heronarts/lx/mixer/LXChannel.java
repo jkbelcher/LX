@@ -194,6 +194,11 @@ public class LXChannel extends LXAbstractChannel {
     new BooleanParameter("View Pattern Label", false)
     .setDescription("Whether to show the active pattern as channel label");
 
+  // HACK FOR OSC COLLECTION COUNT
+  public final DiscreteParameter patternCount =
+    new DiscreteParameter("Number of items in collection", 0, 0, 300)
+    .setDescription("Collection count for OSC development.  Sorry! :grimacing face:");
+
   /**
    * This is a local buffer used to render a secondary pattern
    */
@@ -250,6 +255,8 @@ public class LXChannel extends LXAbstractChannel {
     addParameter("transitionBlendMode", this.transitionBlendMode);
     addParameter("focusedPattern", this.focusedPattern);
     addParameter("triggerPatternCycle", this.triggerPatternCycle);
+    // HACK FOR OSC COLLECTION COUNT
+    addParameter("count", this.patternCount);
   }
 
   void updateTransitionBlendOptions() {
@@ -523,6 +530,9 @@ public class LXChannel extends LXAbstractChannel {
       }
     }
 
+    // HACK FOR OSC COLLECTION COUNT
+    this.patternCount.setValue(this.mutablePatterns.size());
+
     this.focusedPattern.setRange(Math.max(1, this.mutablePatterns.size()));
     if (focusedPattern != null) {
       // Retain the focused pattern index if it has been shifted
@@ -594,6 +604,10 @@ public class LXChannel extends LXAbstractChannel {
     } else if (focusedPatternIndex >= this.mutablePatterns.size()) {
       focusedPatternIndex = this.mutablePatterns.size() - 1;
     }
+
+    // HACK FOR OSC COLLECTION COUNT
+    this.patternCount.setValue(this.mutablePatterns.size());
+
     if ((focusedPatternIndex >= 0) && (this.focusedPattern.getValuei() != focusedPatternIndex)) {
       this.focusedPattern.setValue(focusedPatternIndex);
     } else {
