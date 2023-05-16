@@ -267,6 +267,13 @@ public class LXOscEngine extends LXComponent {
     return this;
   }
 
+  public LXOscEngine sendMessage(String path, String value) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, value);
+    }
+    return this;
+  }
+
   public LXOscEngine sendParameter(LXParameter parameter) {
     if (this.engineTransmitter != null) {
       this.engineTransmitter.onParameterChanged(parameter);
@@ -433,6 +440,14 @@ public class LXOscEngine extends LXComponent {
       sendMessage(oscMessage);
     }
 
+    private void sendMessage(String address, String value) {
+      oscMessage.clearArguments();
+      oscMessage.setAddressPattern(address);
+      oscString.setValue(value);
+      oscMessage.add(oscString);
+      sendMessage(oscMessage);
+    }
+
     private void sendMessage(OscMessage message) {
       try {
         if (logOutput.isOn()) {
@@ -555,7 +570,11 @@ public class LXOscEngine extends LXComponent {
         this.listenerSnapshot.addAll(this.listeners);
         for (OscMessage message : this.engineThreadEventQueue) {
           for (LXOscListener listener : this.listenerSnapshot) {
-            listener.oscMessage(message);
+            try {
+              listener.oscMessage(message);
+            } catch (Exception x) {
+              error(x, "Uncaught exception in OSC listener: " + message.getAddressPattern().getValue());
+            }
           }
         }
       }
