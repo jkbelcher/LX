@@ -122,9 +122,13 @@ public class ChasePattern extends LXPattern {
     .setUnits(BoundedParameter.Units.PERCENT)
     .setDescription("Maximum range of the shift knob");
 
-  public final BooleanParameter alternate =
+  public final BooleanParameter interlace =
+    new BooleanParameter("Interlace", false)
+    .setDescription("Whether to interlace opposite chase direction every other pixel");
+
+  public final BooleanParameter alternateChunk =
     new BooleanParameter("Alternate", false)
-    .setDescription("Whether to alternate swarm motion every other chunk");
+    .setDescription("Whether to alternate chase direction every other chunk");
 
   public final EnumParameter<WrapMode> wrap =
     new EnumParameter<WrapMode>("Wrap", WrapMode.ABS)
@@ -161,6 +165,11 @@ public class ChasePattern extends LXPattern {
     new CompoundParameter("Fade", 50, 0, 100)
     .setUnits(CompoundParameter.Units.PERCENT)
     .setDescription("Fade size of motion");
+
+  public final CompoundParameter level =
+    new CompoundParameter("Level", 1)
+    .setUnits(CompoundParameter.Units.PERCENT_NORMALIZED)
+    .setDescription("Output level");
 
   public final CompoundParameter invert =
     new CompoundParameter("Invert", 0, 0, 100)
@@ -209,7 +218,9 @@ public class ChasePattern extends LXPattern {
     addParameter("chunkSize", this.chunkSize);
     addParameter("shift", this.shift);
     addParameter("shiftRange", this.shiftRange);
-    addParameter("alternate", this.alternate);
+    addLegacyParameter("alternate", this.interlace);
+    addParameter("interlace", this.interlace);
+    addParameter("alternateChunk", this.alternateChunk);
     addParameter("waveshape", this.waveshape);
     addParameter("skew", this.skew);
     addParameter("exp", this.exp);
@@ -225,6 +236,7 @@ public class ChasePattern extends LXPattern {
     addParameter("wrap", this.wrap);
     addParameter("size", this.size);
     addParameter("fade", this.fade);
+    addParameter("level", this.level);
     addParameter("invert", this.invert);
 
     // Swarming Effect
@@ -293,18 +305,21 @@ public class ChasePattern extends LXPattern {
     final double sizePixels = chunkSize * size;
     final double fadePixels = chunkSize * fade;
 
-    final boolean alternate = this.alternate.isOn();
+    final boolean interlace = this.interlace.isOn();
+    final boolean alternateChunk = this.alternateChunk.isOn();
     final WrapMode wrap = this.wrap.getEnum();
 
-    boolean swarmOn = this.swarmOn.isOn();
-    double swarmSize = .01 + this.swarmSize.getValue();
-    double swarmX = this.swarmX.getValue();
-    double swarmY = this.swarmY.getValue();
-    double swarmFade = this.swarmFade.getValue() * .01;
-    double swarmFadeAbs = Math.abs(swarmFade);
-    double swarmBrightness = this.swarmBrightness.getValue() * .01;
-    double swarmBrightnessAbs = Math.abs(swarmBrightness);
-    double shift = this.shift.getValue() * .01 * this.shiftRange.getValue() * .01 * chunkSize;
+    final boolean swarmOn = this.swarmOn.isOn();
+    final double swarmSize = .01 + this.swarmSize.getValue();
+    final double swarmX = this.swarmX.getValue();
+    final double swarmY = this.swarmY.getValue();
+    final double swarmFade = this.swarmFade.getValue() * .01;
+    final double swarmFadeAbs = Math.abs(swarmFade);
+    final double swarmBrightness = this.swarmBrightness.getValue() * .01;
+    final double swarmBrightnessAbs = Math.abs(swarmBrightness);
+    final double shift = this.shift.getValue() * .01 * this.shiftRange.getValue() * .01 * chunkSize;
+
+    final double level = this.level.getValue();
 
     double minSizePixels = LXUtils.lerp(0, chunkSize + sizePixels, invert);
     double minFadePixels = LXUtils.lerp(0, chunkSize + sizePixels, invert);
@@ -320,7 +335,8 @@ public class ChasePattern extends LXPattern {
     for (LXPoint p : model.points) {
       int chunkIndex = i / chunkSizei;
       double pos = i % chunkSize;
-      if (even && alternate) {
+      boolean evenChunk = (chunkIndex % 2) == 0;
+      if ((even && interlace) ^ (evenChunk & alternateChunk)) {
         pos = (chunkSize - pos) % chunkSize;
       }
 
@@ -352,7 +368,7 @@ public class ChasePattern extends LXPattern {
         b = LXUtils.lerp(b, 0, swarmBrightnessLerp);
       }
 
-      colors[p.index] = LXColor.gray(b);
+      colors[p.index] = LXColor.gray(level * b);
       ++i;
       even = !even;
     }
