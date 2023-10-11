@@ -41,6 +41,8 @@ import heronarts.lx.midi.LXMidiListener;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.midi.MidiFilterParameter;
 import heronarts.lx.midi.surface.LXMidiSurface;
+import heronarts.lx.mixer.LXAbstractChannel;
+import heronarts.lx.model.LXModel;
 import heronarts.lx.modulation.LXModulationContainer;
 import heronarts.lx.modulation.LXModulationEngine;
 import heronarts.lx.osc.LXOscComponent;
@@ -48,14 +50,22 @@ import heronarts.lx.parameter.AggregateParameter;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.LXListenableNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
+import heronarts.lx.parameter.LXParameterListener;
 import heronarts.lx.parameter.MutableParameter;
 import heronarts.lx.parameter.StringParameter;
+import heronarts.lx.structure.view.LXViewDefinition;
+import heronarts.lx.structure.view.LXViewEngine;
 
 /**
  * A component which may have its own scoped user-level modulators. The concrete subclasses
  * of this are Patterns and Effects.
  */
 public abstract class LXDeviceComponent extends LXLayeredComponent implements LXModulationContainer, LXOscComponent, LXMidiListener {
+
+  /**
+   * Marker interface that indicates this device implements MIDI functionality
+   */
+  public interface Midi {}
 
   public static final Comparator<Class<? extends LXDeviceComponent>> DEVICE_CATEGORY_NAME_SORT =
     new Comparator<Class<? extends LXDeviceComponent>>() {
@@ -113,6 +123,15 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     .setDescription("MIDI filter settings for this device");
 
   /**
+   * View selector for this device
+   */
+  public final LXViewEngine.Selector view;
+  public final LXViewEngine.Selector viewPriority;
+
+  private final LXParameterListener viewListener;
+  private final LXParameterListener viewPriorityListener;
+
+  /**
    * A semaphore used to keep count of how many remote control surfaces may be
    * controlling this component. This may be used by UI implementations to indicate
    * to the user that this component is under remote control.
@@ -138,6 +157,32 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     addInternalParameter("modulationExpanded", this.modulationExpanded);
     addInternalParameter("presetFile", this.presetFile);
     addInternalParameter("midiFilter", this.midiFilter);
+
+    addParameter("view", this.view = lx.structure.views.newViewSelector("View", "Model view selector for this device"));
+    addParameter("viewPriority", this.viewPriority = lx.structure.views.newViewSelectorPriority("View", "Priority model view selector for this device"));
+
+    this.view.addListener(this.viewListener = p -> {
+      LXViewDefinition view = this.view.getObject();
+      if ((view == null) || view.priority.isOn()) {
+        this.viewPriority.setValue(view);
+      }
+    });
+
+    this.viewPriority.addListener(this.viewPriorityListener = p -> {
+      this.view.setValue(this.viewPriority.getObject());
+    });
+  }
+
+  public LXModel getModelView() {
+    LXViewDefinition view = this.view.getObject();
+    if (view != null) {
+      return view.getModelView();
+    }
+    LXComponent parent = getParent();
+    if (parent instanceof LXAbstractChannel) {
+      return ((LXAbstractChannel) parent).getModelView();
+    }
+    return getModel();
   }
 
   private void validateRemoteControls(LXListenableNormalizedParameter ... remoteControls) {
@@ -189,7 +234,11 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
    * @param parameter Parameter to check
    * @return true if this should be hidden by default
    */
-  public abstract boolean isHiddenControl(LXParameter parameter);
+  public boolean isHiddenControl(LXParameter parameter) {
+    return
+      (parameter == this.view) ||
+      (parameter == this.viewPriority);
+  }
 
   protected LXDeviceComponent resetRemoteControls() {
     this.defaultRemoteControls = null;
@@ -307,8 +356,15 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
   public void midiDispatch(LXShortMessage message) {
     if (this.midiFilter.filter(message)) {
       message.dispatch(this);
-      getModulationEngine().midiDispatch(message);
     }
+    getModulationEngine().midiDispatch(message);
+  }
+
+  @Override
+  public void dispose() {
+    this.view.removeListener(this.viewListener);
+    this.viewPriority.removeListener(this.viewPriorityListener);
+    super.dispose();
   }
 
   protected static final String KEY_DEVICE_VERSION = "deviceVersion";

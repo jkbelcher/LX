@@ -22,6 +22,7 @@ import heronarts.lx.audio.LXAudioEngine;
 import heronarts.lx.clip.LXClipEngine;
 import heronarts.lx.color.LXColor;
 import heronarts.lx.color.LXPalette;
+import heronarts.lx.dmx.LXDmxEngine;
 import heronarts.lx.midi.LXMidiEngine;
 import heronarts.lx.mixer.LXBus;
 import heronarts.lx.mixer.LXChannel;
@@ -41,6 +42,8 @@ import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.snapshot.LXSnapshotEngine;
 import heronarts.lx.structure.LXFixture;
+
+import java.io.File;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -83,6 +86,8 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
   public final LXMappingEngine mapping;
 
   public final LXOscEngine osc;
+
+  public final LXDmxEngine dmx;
 
   private Dispatch inputDispatch = null;
 
@@ -399,6 +404,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // Snapshot engine
     addChild("snapshots", this.snapshots = new LXSnapshotEngine(lx));
     LX.initProfiler.log("Engine: Snapshots");
+
+    // DMX engine
+    addChild("dmx", this.dmx = new LXDmxEngine(lx));
+    LX.initProfiler.log("Engine: DMX");
 
     // Midi engine
     addChild("midi", this.midi = new LXMidiEngine(lx));
@@ -1269,12 +1278,34 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     frame.copyFrom(this.buffer.render);
   }
 
+  public static final String PATH_FRAMERATE = "framerate";
+  public static final String PATH_OPEN_PROJECT = "openProject";
+
   @Override
   public boolean handleOscMessage(OscMessage message, String[] parts, int index) {
     String path = parts[index];
-    if (path.equals("framerate")) {
-      this.osc.sendMessage("/lx/framerate", this.actualFrameRate);
+    if (path.equals(PATH_FRAMERATE)) {
+      this.osc.sendMessage(getOscAddress() + "/" + PATH_FRAMERATE, this.actualFrameRate);
       return true;
+    } else if (path.equals(PATH_OPEN_PROJECT)) {
+      final String fileName = message.getString();
+      final File projectFile = this.lx.getMediaFile(LX.Media.PROJECTS, fileName);
+      if (!projectFile.exists()) {
+        LXOscEngine.error("Requested non-existent project file: " + projectFile);
+        return false;
+      }
+      if (projectFile.equals(this.lx.getProject())) {
+        LXOscEngine.log("Requested project file is already open, ignoring: " + projectFile);
+        return false;
+      }
+      try {
+        LXOscEngine.log("Opening project file: " + projectFile);
+        this.lx.openProject(projectFile);
+        return true;
+      } catch (Throwable x) {
+        LXOscEngine.error(x, "Error opening project \"" + projectFile + "\": " + x.getMessage());
+      }
+      return false;
     }
     return super.handleOscMessage(message, parts, index);
   }
@@ -1301,6 +1332,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     this.audio.dispose();
     this.midi.dispose();
     this.osc.dispose();
+    this.dmx.dispose();
     this.tempo.dispose();
     synchronized (this.networkThread) {
       this.networkThread.interrupt();

@@ -199,7 +199,6 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
     new EnumParameter<KnobClickMode>("Knob Click", KnobClickMode.RESET)
     .setDescription("How to edit parameters when a knob is pressed");
 
-
   public final EnumParameter<FocusMode> focusMode =
     new EnumParameter<FocusMode>("Focus Buttons", FocusMode.DEVICE)
     .setDescription("How to change focus on bottom side button press");
@@ -401,7 +400,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
               payload[idx] = configData.get(iConfig++);
             }
 
-            // System.out.println("Encoder sysex(" + this.encoderIndex + "): " + bytesToString(payload));
+            // LXMidiEngine.log("MFT Encoder sysex(" + this.encoderIndex + "): " + bytesToString(payload));
             output.sendSysex(payload);
           }
         }
@@ -426,7 +425,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
         payload[6] = sysexTag;                      // Encoder identifier
         payload[7] = (byte)0xf7;                    // End sysex
 
-        // System.out.println("Encoder sysex(" + this.encoderIndex + "): " + bytesToString(payload));
+        // LXMidiEngine.log("MFT Encoder sysex(" + this.encoderIndex + "): " + bytesToString(payload));
         output.sendSysex(payload);
 
         // TODO: Process response
@@ -442,7 +441,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
 
     private void pull() {
       // TODO: Query current surface settings
-      System.err.println("Warning: sysex pull not implemented");
+      LXMidiEngine.error("Warning: MFT sysex pull not implemented");
 
       // TODO: Check firmware version for compatibility,
       // only send sysex if year > 2016
@@ -463,7 +462,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
 
     private boolean sendEncoders(boolean forceAll) {
       if (!this.initialized) {
-        System.err.println("Cannot push empty config to device");
+        LXMidiEngine.error("Cannot push empty config to MFT device");
         return false;
       }
 
@@ -482,7 +481,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
 
     private void sendGlobal() {
       if (!this.initialized) {
-        System.err.println("Cannot push empty config to device");
+        LXMidiEngine.error("Cannot push empty config to MFT device");
         return;
       }
 
@@ -499,7 +498,7 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
       }
       sysex[iSys] = (byte)0xf7;
 
-      // System.out.println("System sysex:      " + bytesToString(sysex));
+      // LXMidiEngine.log("MFT System sysex:      " + bytesToString(sysex));
       output.sendSysex(sysex);
     }
 
@@ -899,8 +898,8 @@ public class MidiFighterTwister extends LXMidiSurface implements LXMidiSurface.B
     this.deviceListener = new DeviceListener(lx);
     addSetting("knobClickMode", this.knobClickMode);
     addSetting("focusMode", this.focusMode);
-    addState("currentBank", this.currentBank);
-    addState("isAux", this.isAux);
+    addSetting("isAux", this.isAux);
+    addSetting("currentBank", this.currentBank);
   }
 
   @Override

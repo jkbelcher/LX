@@ -51,6 +51,7 @@ import heronarts.lx.output.OPCSocket;
 import heronarts.lx.output.StreamingACNDatagram;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.StringParameter;
+import heronarts.lx.structure.view.LXViewEngine;
 import heronarts.lx.utils.LXUtils;
 
 public class LXStructure extends LXComponent implements LXFixtureContainer {
@@ -79,17 +80,19 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       private final InetAddress address;
       private final int port;
       private final int universe;
+      private int priority;
       private boolean sequenceEnabled;
       private float fps = 0f;
 
       private final List<IndexBuffer.Segment> segments = new ArrayList<IndexBuffer.Segment>();
 
-      private Packet(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, boolean sequenceEnabled) {
+      private Packet(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, int priority, boolean sequenceEnabled) {
         this.protocol = protocol;
         this.transport = transport;
         this.address = address;
         this.port = port;
         this.universe = universe;
+        this.priority = priority;
         this.sequenceEnabled = sequenceEnabled;
       }
 
@@ -184,7 +187,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
             .setSequenceEnabled(this.sequenceEnabled);
           break;
         case SACN:
-          output = new StreamingACNDatagram(lx, toIndexBuffer(), this.universe);
+          output = new StreamingACNDatagram(lx, toIndexBuffer(), this.universe).setPriority(this.priority);
           break;
         case KINET:
           output = new KinetDatagram(lx, toIndexBuffer(), this.universe);
@@ -212,7 +215,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       }
     }
 
-    private Packet findPacket(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, boolean sequenceEnabled) {
+    private Packet findPacket(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, int priority, boolean sequenceEnabled) {
       // Check if there's an existing packet for this address space
       for (Packet packet : this.packets) {
         if ((packet.protocol == protocol)
@@ -221,14 +224,18 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
           && (packet.port == port)
           && (packet.universe == universe)) {
 
+          // Priority is the max of any segment contained within
+          packet.priority = LXUtils.max(packet.priority, priority);
+
           // Sequences enabled if any segment demands it
           packet.sequenceEnabled = packet.sequenceEnabled || sequenceEnabled;
+
           return packet;
         }
       }
 
       // Create a new packet for this address space
-      Packet packet = new Packet(protocol, transport, address, port, universe, sequenceEnabled);
+      Packet packet = new Packet(protocol, transport, address, port, universe, priority, sequenceEnabled);
       this.packets.add(packet);
       return packet;
     }
@@ -294,12 +301,13 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       final int port = output.port;
       int universe = output.universe;
       int channel = output.channel;
+      final int priority = output.priority;
       final boolean sequenceEnabled = output.sequenceEnabled;
       final float fps = output.fps;
       boolean overflow = false;
 
       // Find the starting packet for this output definition
-      Packet packet = findPacket(protocol, transport, address, port, universe, sequenceEnabled);
+      Packet packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
       for (LXFixture.Segment segment : output.segments) {
         if (overflow) {
           // Is it okay for this type to overflow?
@@ -310,7 +318,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
           overflow = false;
           ++universe;
           channel = 0;
-          packet = findPacket(protocol, transport, address, port, universe, sequenceEnabled);
+          packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
         }
 
         int chunkStart = 0;
@@ -343,7 +351,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
           ++universe;
           channel = 0;
           availableBytes = protocol.maxChannels;
-          packet = findPacket(protocol, transport, address, port, universe, sequenceEnabled);
+          packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
         }
 
         // Add the final chunk (the whole segment in the common case)
@@ -471,6 +479,8 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
 
   public final Output output;
 
+  public final LXViewEngine views;
+
   public LXStructure(LX lx) {
     this(lx, null);
   }
@@ -480,6 +490,8 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     addParameter("syncModelFile", this.syncModelFile);
     addParameter("allWhite", this.allWhite);
     addParameter("mute", this.mute);
+
+    addChild("views", this.views = new LXViewEngine(lx));
 
     if (immutable != null) {
       this.isImmutable = true;
@@ -871,6 +883,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
   }
 
   private LXStructure reset(boolean fromSync) {
+    this.views.reset();
     this.staticModel = null;
     removeAllFixtures();
     if (!fromSync) {
@@ -975,6 +988,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
   private boolean isLoading = false;
 
   private static final String KEY_FIXTURES = "fixtures";
+  private static final String KEY_VIEWS = "views";
   private static final String KEY_STATIC_MODEL = "staticModel";
   private static final String KEY_FILE = "file";
 
@@ -1012,7 +1026,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     // Reset everything to complete scratch!
     reset(false);
 
-    // Load parameter values
+    // Load parameter values, this is also where views will get loaded
     super.load(lx, obj);
 
     // Are we in static model mode? Load that.
@@ -1066,7 +1080,11 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     regenerateOutputs();
 
     if (this.output != null) {
-      LXSerializable.Utils.loadObject(lx, this.output, obj, KEY_OUTPUT);
+      if (obj.has(KEY_OUTPUT)) {
+        LXSerializable.Utils.loadObject(lx, this.output, obj, KEY_OUTPUT);
+      } else {
+        LXSerializable.Utils.resetObject(lx, this.output);
+      }
     }
 
   }
@@ -1123,7 +1141,9 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     this.lx.setModelImportFlag(true);
     try (FileReader fr = new FileReader(file)) {
       reset(fromSync);
-      loadFixtures(this.lx, new Gson().fromJson(fr, JsonObject.class));
+      final JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
+      loadFixtures(this.lx, obj);
+      LXSerializable.Utils.loadObject(this.lx, this.views, obj, KEY_VIEWS);
       this.modelFile = file;
       this.modelName.setValue(file.getName());
       this.isStatic.bang();
@@ -1154,6 +1174,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     obj.addProperty(LX.KEY_VERSION, LX.VERSION);
     obj.addProperty(LX.KEY_TIMESTAMP, System.currentTimeMillis());
     saveFixtures(this.lx, obj);
+    obj.add(KEY_VIEWS, LXSerializable.Utils.toObject(lx, this.views));
     try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
       writer.setIndent("  ");
       new GsonBuilder().create().toJson(obj, writer);

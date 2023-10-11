@@ -35,12 +35,14 @@ import heronarts.lx.LXSerializable;
 import heronarts.lx.LXTime;
 import heronarts.lx.blend.LXBlend;
 import heronarts.lx.effect.LXEffect;
+import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.mixer.LXChannel;
 import heronarts.lx.mixer.LXMixerEngine;
 import heronarts.lx.osc.LXOscComponent;
 import heronarts.lx.osc.LXOscEngine;
 import heronarts.lx.osc.OscMessage;
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
@@ -161,6 +163,19 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     new CompoundParameter("Composite Level", 1)
     .setDescription("Alpha level to composite pattern at when in channel blend mode");
 
+
+  public final BooleanParameter hasCustomCycleTime =
+    new BooleanParameter("Custom Cycle", false)
+    .setDescription("When enabled, this pattern uses its own custom duration rather than the default cycle time");
+
+  /**
+   * Custom time for this pattern to cycle
+   */
+  public final BoundedParameter customCycleTimeSecs =
+    new BoundedParameter("Cycle Time", 60, .1, 60*60*4)
+    .setDescription("Sets the number of seconds after which the channel cycles to the next pattern")
+    .setUnits(LXParameter.Units.SECONDS);
+
   private final LXParameterListener onEnabled = p -> {
     final boolean isEnabled = this.enabled.isOn();
     final LXChannel channel = getChannel();
@@ -212,6 +227,8 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     addParameter("recall", this.recall);
     addParameter("compositeMode", this.compositeMode);
     addParameter("compositeLevel", this.compositeLevel);
+    addParameter("hasCustomCycleTime", this.hasCustomCycleTime);
+    addParameter("customCycleTimeSecs", this.customCycleTimeSecs);
 
     updateCompositeBlendOptions();
     this.compositeMode.addListener(this.onCompositeMode);
@@ -226,7 +243,10 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
       parameter == this.recall ||
       parameter == this.compositeMode ||
       parameter == this.compositeLevel ||
-      parameter == this.enabled;
+      parameter == this.enabled ||
+      parameter == this.hasCustomCycleTime ||
+      parameter == this.customCycleTimeSecs ||
+      super.isHiddenControl(parameter);
   }
 
   @Override
@@ -408,7 +428,6 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
     this.mutableEffects.add(index, effect);
     effect.setPattern(this);
-    effect.setModel(getModel());
     _reindexEffects();
     for (Listener listener : this.listeners) {
       listener.effectAdded(this, effect);
@@ -520,10 +539,8 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     long effectStart = System.nanoTime();
     if (!this.mutableEffects.isEmpty()) {
       for (LXEffect effect : this.mutableEffects) {
-        // TODO(mcslee): update this model in the future... it will be
-        // possible that the effect uses a different view than its parent pattern
-        effect.setModel(getModel());
         effect.setBuffer(getBuffer());
+        effect.setModel(effect.getModelView());
         effect.loop(deltaMs);
       }
     }
@@ -601,6 +618,14 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
    * into this pattern is complete.
    */
   public/* abstract */void onTransitionEnd() {
+  }
+
+  @Override
+  public void midiDispatch(LXShortMessage message) {
+    super.midiDispatch(message);
+    for (LXEffect effect : this.effects) {
+      effect.midiDispatch(message);
+    }
   }
 
   private static final String KEY_EFFECTS = "effects";

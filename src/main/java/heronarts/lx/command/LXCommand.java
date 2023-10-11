@@ -64,6 +64,7 @@ import heronarts.lx.snapshot.LXSnapshotEngine;
 import heronarts.lx.structure.JsonFixture;
 import heronarts.lx.structure.LXFixture;
 import heronarts.lx.structure.LXStructure;
+import heronarts.lx.structure.view.LXViewDefinition;
 
 /**
  * An LXCommand is an operation that may be performed by the engine, potentially
@@ -1158,12 +1159,54 @@ public abstract class LXCommand {
 
       @Override
       public void perform(LX lx) {
-        lx.engine.mixer.moveChannel(this.channel.get(), delta);
+        lx.engine.mixer.moveChannel(this.channel.get(), this.delta);
       }
 
       @Override
       public void undo(LX lx) {
-        lx.engine.mixer.moveChannel(this.channel.get(), -delta);
+        lx.engine.mixer.moveChannel(this.channel.get(), -this.delta);
+      }
+
+    }
+
+    public static class DropChannel extends LXCommand {
+
+      private final ComponentReference<LXAbstractChannel> channel;
+      private final ComponentReference<LXGroup> toGroup;
+      private final ComponentReference<LXGroup> fromGroup;
+      private final int fromIndex;
+      private final int toIndex;
+
+      public DropChannel(LXAbstractChannel channel, int index, LXGroup group) {
+        this.channel = new ComponentReference<LXAbstractChannel>(channel);
+        this.fromGroup = channel.isInGroup() ? new ComponentReference<LXGroup>(channel.getGroup()) : null;
+        this.toGroup = (group != null) ? new ComponentReference<LXGroup>(group) : null;
+        this.toIndex = index;
+
+        // Leftward group moves are tricky, when we move
+        // back to the right, we need to additionally move
+        // over all the group channels
+        int fromIndex = channel.getIndex();
+        if (channel.isGroup() && (fromIndex > index)) {
+          fromIndex += ((LXGroup) channel).channels.size();
+        }
+        this.fromIndex = fromIndex;
+
+      }
+
+      @Override
+      public String getDescription() {
+        return "Move Channel";
+      }
+
+      @Override
+      public void perform(LX lx) {
+        lx.engine.mixer.moveChannel(this.channel.get(), this.toIndex, (this.toGroup != null) ? this.toGroup.get() : null);
+      }
+
+      @Override
+      public void undo(LX lx) {
+        lx.engine.mixer.moveChannel(this.channel.get(), this.fromIndex, (this.fromGroup != null) ? this.fromGroup.get() : null);
       }
 
     }
@@ -1895,7 +1938,7 @@ public abstract class LXCommand {
 
       private final ComponentReference<LXSwatch> swatch;
       private final int fromIndex;
-      private final int toIndex;;
+      private final int toIndex;
 
       public MoveSwatch(LXSwatch swatch, int toIndex) {
         this.swatch = new ComponentReference<LXSwatch>(swatch);
@@ -2405,6 +2448,111 @@ public abstract class LXCommand {
         for (LXCommand.Parameter.SetValue setValue : this.setValues.values()) {
           setValue.undo(lx);
         }
+      }
+
+    }
+
+    public static class AddView extends LXCommand {
+
+      private ComponentReference<LXViewDefinition> view;
+      private JsonObject viewObj;
+      private int index = -1;
+      private JsonObject initialObj;
+
+      public AddView() {}
+
+      public AddView(JsonObject initialObj, int index) {
+        this.index = index;
+        this.initialObj = initialObj;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Add View";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        if (this.view != null) {
+          lx.structure.views.addView(this.viewObj, this.index);
+        } else {
+          LXViewDefinition view;
+          if (this.initialObj != null) {
+            view = lx.structure.views.addView(this.initialObj, this.index);
+          } else {
+            view = lx.structure.views.addView();
+          }
+          this.index = view.getIndex();
+          this.viewObj = LXSerializable.Utils.toObject(view);
+          this.view = new ComponentReference<LXViewDefinition>(view);
+        }
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.structure.views.removeView(this.view.get());
+      }
+
+    }
+
+    public static class RemoveView extends RemoveComponent {
+
+      private final ComponentReference<LXViewDefinition> view;
+      private final JsonObject viewObj;
+      private final int viewIndex;
+
+      public RemoveView(LXViewDefinition view) {
+        super(view);
+        this.view = new ComponentReference<LXViewDefinition>(view);
+        this.viewObj = LXSerializable.Utils.toObject(view);
+        this.viewIndex = view.getIndex();
+      }
+
+      @Override
+      public String getDescription() {
+        return "Delete View";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        lx.structure.views.removeView(this.view.get());
+
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.structure.views.addView(this.viewObj, this.viewIndex);
+        super.undo(lx);
+      }
+
+    }
+
+    public static class MoveView extends LXCommand {
+
+      private final ComponentReference<LXViewDefinition> view;
+      private final int fromIndex;
+      private final int toIndex;
+
+      public MoveView(LXViewDefinition view, int toIndex) {
+        this.view = new ComponentReference<LXViewDefinition>(view);
+        this.fromIndex = view.getIndex();
+        this.toIndex = toIndex;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Move View";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        lx.structure.views.moveView(this.view.get(), this.toIndex);
+
+      }
+
+      @Override
+      public void undo(LX lx) {
+        lx.structure.views.moveView(this.view.get(), this.fromIndex);
       }
 
     }

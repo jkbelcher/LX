@@ -118,13 +118,14 @@ public class LXRegistry implements LXSerializable {
     if (!this.listeners.contains(listener)) {
       throw new IllegalStateException("Trying to remove non-registered LXRegistry.Listener: " + listener);
     }
-    this.listeners.add(listener);
+    this.listeners.remove(listener);
     return this;
   }
 
   private static final List<Class<? extends LXPattern>> DEFAULT_PATTERNS;
   static {
     DEFAULT_PATTERNS = new ArrayList<Class<? extends LXPattern>>();
+    DEFAULT_PATTERNS.add(heronarts.lx.dmx.DmxPattern.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.audio.SoundObjectPattern.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.color.GradientPattern.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.color.SolidPattern.class);
@@ -153,15 +154,24 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_MODULATORS = new ArrayList<Class<? extends LXModulator>>();
     DEFAULT_MODULATORS.add(heronarts.lx.audio.BandGate.class);
     DEFAULT_MODULATORS.add(heronarts.lx.audio.SoundObject.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.dmx.DmxModulator.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.BooleanLogic.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.ComparatorModulator.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Damper.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Interval.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MacroKnobs.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MacroSwitches.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MacroTriggers.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.MidiNoteTrigger.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MultiStageEnvelope.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MultiModeEnvelope.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.MultiTrig.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.NoiseModulator.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.OperatorModulator.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Randomizer.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.Scaler.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.Smoother.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.Spring.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.StepSequencer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Timer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.VariableLFO.class);
@@ -179,6 +189,8 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_CHANNEL_BLENDS.add(BurnBlend.class);
     DEFAULT_CHANNEL_BLENDS.add(HighlightBlend.class);
     DEFAULT_CHANNEL_BLENDS.add(SpotlightBlend.class);
+    DEFAULT_CHANNEL_BLENDS.add(LightestBlend.class);
+    DEFAULT_CHANNEL_BLENDS.add(DarkestBlend.class);
 
   }
 
