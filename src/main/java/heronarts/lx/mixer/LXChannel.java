@@ -19,6 +19,7 @@
 package heronarts.lx.mixer;
 
 import heronarts.lx.LX;
+import heronarts.lx.LXComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.ModelBuffer;
 import heronarts.lx.blend.LXBlend;
@@ -26,6 +27,7 @@ import heronarts.lx.clip.LXChannelClip;
 import heronarts.lx.clip.LXClip;
 import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXShortMessage;
+import heronarts.lx.midi.MidiPanic;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.osc.LXOscEngine;
 import heronarts.lx.osc.OscMessage;
@@ -251,10 +253,20 @@ public class LXChannel extends LXAbstractChannel {
     addParameter("triggerPatternCycle", this.triggerPatternCycle);
   }
 
+  @Override
+  public boolean isPlaylist() {
+    return this.compositeMode.getEnum() == LXChannel.CompositeMode.PLAYLIST;
+  }
+
+  @Override
+  public boolean isComposite() {
+    return this.compositeMode.getEnum() == LXChannel.CompositeMode.BLEND;
+  }
+
   void updateTransitionBlendOptions() {
     for (LXBlend blend : this.transitionBlendMode.getObjects()) {
       if (blend != null) {
-        blend.dispose();
+        LX.dispose(blend);
       }
     }
     this.transitionBlendMode.setObjects(this.lx.engine.mixer.instantiateTransitionBlends());
@@ -383,22 +395,28 @@ public class LXChannel extends LXAbstractChannel {
 
   @Override
   public void midiDispatch(LXShortMessage message) {
-    switch (this.compositeMode.getEnum()) {
-    case PLAYLIST:
-      final LXPattern activePattern = getActivePattern();
-      activePattern.midiDispatch(message);
-      LXPattern nextPattern = getNextPattern();
-      if (nextPattern != null && nextPattern != activePattern) {
-        nextPattern.midiDispatch(message);
-      }
-      break;
-    case BLEND:
+    if (message instanceof MidiPanic) {
       for (LXPattern pattern : this.patterns) {
-        if (pattern.enabled.isOn()) {
-          pattern.midiDispatch(message);
-        }
+        pattern.midiDispatch(message);
       }
-      break;
+    } else {
+      switch (this.compositeMode.getEnum()) {
+      case PLAYLIST:
+        final LXPattern activePattern = getActivePattern();
+        activePattern.midiDispatch(message);
+        LXPattern nextPattern = getNextPattern();
+        if (nextPattern != null && nextPattern != activePattern) {
+          nextPattern.midiDispatch(message);
+        }
+        break;
+      case BLEND:
+        for (LXPattern pattern : this.patterns) {
+          if (pattern.enabled.isOn()) {
+            pattern.midiDispatch(message);
+          }
+        }
+        break;
+      }
     }
     super.midiDispatch(message);
   }
@@ -523,6 +541,7 @@ public class LXChannel extends LXAbstractChannel {
     for (Listener listener : this.listenerSnapshot) {
       listener.patternAdded(this, pattern);
     }
+    this.lx.engine.clips.updatePatternGridSize();
 
     // If this was the first pattern, focusedPattern has "changed" going from 0 -> 0
     if (this.mutablePatterns.size() == 1) {
@@ -592,6 +611,8 @@ public class LXChannel extends LXAbstractChannel {
     for (Listener listener : this.listenerSnapshot) {
       listener.patternRemoved(this, pattern);
     }
+    this.lx.engine.clips.updatePatternGridSize();
+
     if (activateNext && !this.patterns.isEmpty()) {
       LXPattern newActive = getActivePattern();
       newActive.activate(LXMixerEngine.patternFriendAccess);
@@ -600,7 +621,7 @@ public class LXChannel extends LXAbstractChannel {
       }
       this.lx.engine.osc.sendMessage(getOscAddress() + "/" + PATH_ACTIVE_PATTERN, newActive.getIndex());
     }
-    pattern.dispose();
+    LX.dispose(pattern);
     return this;
   }
 
@@ -649,6 +670,7 @@ public class LXChannel extends LXAbstractChannel {
     boolean active = (pattern == getActivePattern());
     boolean focused = (pattern == getFocusedPattern());
 
+    // TODO(mcslee): Collect and restore global modulations to this pattern!
     int index = pattern.getIndex();
     JsonObject patternObj = new JsonObject();
     pattern.save(getLX(), patternObj);
@@ -659,6 +681,9 @@ public class LXChannel extends LXAbstractChannel {
     }
     if (active) {
       goPattern(newPattern);
+      if (this.transition != null) {
+        finishTransition();
+      }
     }
     return this;
   }
@@ -954,7 +979,6 @@ public class LXChannel extends LXAbstractChannel {
     if (this.compositeMode.getEnum() == CompositeMode.BLEND) {
 
       // Blend mode, this channel is like a mini-mixer
-      final LXModel modelView = getModelView();
 
       // Damping mode
       final boolean dampingEnabled = this.compositeDampingEnabled.isOn();
@@ -966,15 +990,16 @@ public class LXChannel extends LXAbstractChannel {
         if (patternDamping == 0) {
           continue;
         }
+        final LXModel patternView = pattern.getModelView();
         pattern.setBuffer(this.renderBuffer);
-        pattern.setModel(pattern.getModelView());
+        pattern.setModel(patternView);
         pattern.loop(deltaMs);
         pattern.compositeMode.getObject().blend(
           this.colors,
           pattern.getColors(),
           patternDamping * pattern.compositeLevel.getValue(),
           this.colors,
-          modelView
+          patternView
         );
       }
 
@@ -1070,7 +1095,7 @@ public class LXChannel extends LXAbstractChannel {
     this.focusedPattern.setValue(0);
 
     for (LXPattern pattern : this.mutablePatterns) {
-      pattern.dispose();
+      LX.dispose(pattern);
     }
     this.mutablePatterns.clear();
     if (this.thread.hasStarted) {
@@ -1083,6 +1108,17 @@ public class LXChannel extends LXAbstractChannel {
     super.dispose();
   }
 
+  @Override
+  public Class<?> getPresetClass() {
+    return getClass();
+  }
+
+  @Override
+  public void postProcessPreset(LX lx, JsonObject obj) {
+    super.postProcessPreset(lx, obj);
+    obj.remove(KEY_GROUP);
+  }
+
   private static final String KEY_PATTERNS = "patterns";
   private static final String KEY_PATTERN_INDEX = "patternIndex";
   private static final String KEY_GROUP = "group";
@@ -1093,9 +1129,6 @@ public class LXChannel extends LXAbstractChannel {
     super.save(lx, obj);
     obj.addProperty(KEY_PATTERN_INDEX, this.activePatternIndex);
     obj.add(KEY_PATTERNS, LXSerializable.Utils.toArray(lx, this.patterns));
-    if (isGroup()) {
-      obj.addProperty(KEY_IS_GROUP, true);
-    }
     if (this.group != null) {
       obj.addProperty(KEY_GROUP, this.group.getId());
     }
@@ -1110,8 +1143,13 @@ public class LXChannel extends LXAbstractChannel {
 
     // Set appropriate group membership
     if (obj.has(KEY_GROUP)) {
-      LXGroup group = (LXGroup) lx.getProjectComponent(obj.get(KEY_GROUP).getAsInt());
-      group.addChannel(this);
+      final int groupId = obj.get(KEY_GROUP).getAsInt();
+      final LXComponent group = lx.getProjectComponent(groupId);
+      if (group instanceof LXGroup) {
+        ((LXGroup)group).addChannel(this);
+      } else {
+        LX.error("Group ID " + groupId + " not found when restoring channel: " + this);
+      }
     }
 
     // Add patterns

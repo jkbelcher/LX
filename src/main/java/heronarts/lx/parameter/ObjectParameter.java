@@ -22,7 +22,7 @@ import java.util.Objects;
 
 public class ObjectParameter<T> extends DiscreteParameter {
 
-  private static <T> int defaultValue(T value, T[] objects) {
+  static <T> int defaultValue(T value, T[] objects) {
     if (value == null) {
       return 0;
     }
@@ -32,6 +32,23 @@ public class ObjectParameter<T> extends DiscreteParameter {
       }
     }
     throw new IllegalArgumentException("The ObjectParameter value is not present in the objects[]: " + value);
+  }
+
+  static <T> int indexOf(T value, T[] objects) {
+    for (int i = 0; i < objects.length; ++i) {
+      if (Objects.equals(value, objects[i])) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  static <T> String[] toOptions(T[] objects) {
+    final String[] options = new String[objects.length];
+    for (int i = 0; i < objects.length; ++i) {
+      options[i] = (objects[i] == null) ? "null" : objects[i].toString();
+    }
+    return options;
   }
 
   private T[] objects = null;
@@ -74,31 +91,29 @@ public class ObjectParameter<T> extends DiscreteParameter {
   public ObjectParameter<T> setObjects(T[] objects, String[] options) {
     this.objects = objects;
     if (options == null) {
-      options = new String[objects.length];
-      for (int i = 0; i < objects.length; ++i) {
-        options[i] = (objects[i] == null) ? "null" : objects[i].toString();
-      }
+      options = toOptions(objects);
     }
     setOptions(options);
     return this;
   }
 
   @Override
-  public DiscreteParameter setRange(int minValue, int maxValue) {
+  public ObjectParameter<T> setRange(int minValue, int maxValue) {
     if (this.objects!= null && (this.objects.length != maxValue - minValue)) {
       throw new UnsupportedOperationException("May not call setRange on an ObjectParameter with Object list of different length");
     }
-    return super.setRange(minValue, maxValue);
+    super.setRange(minValue, maxValue);
+    return this;
   }
 
-  public LXParameter setValue(Object object) {
+  public ObjectParameter<T> setValue(Object object) {
     if (this.objects == null) {
       throw new UnsupportedOperationException("Cannot setValue with an object unless setObjects() was called");
     }
-    for (int i = 0; i < this.objects.length; ++i) {
-      if (Objects.equals(object, this.objects[i])) {
-        return setValue(i);
-      }
+    int index = indexOf(object, this.objects);
+    if (index >= 0) {
+      setValue(index);
+      return this;
     }
     throw new IllegalArgumentException("Not a valid object for this parameter: " + object.toString());
   }
@@ -108,7 +123,7 @@ public class ObjectParameter<T> extends DiscreteParameter {
   }
 
   public T getObject() {
-    return this.objects[getValuei()];
+    return this.objects[getIndex()];
   }
 
 }

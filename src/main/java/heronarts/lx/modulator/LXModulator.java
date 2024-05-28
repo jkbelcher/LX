@@ -229,11 +229,13 @@ public abstract class LXModulator extends LXRunnableComponent implements LXCompo
     return "modulator/" + (this.index + 1);
   }
 
+  @Override
   public LXModulator setFormatter(Formatter formatter) {
     this.formatter = formatter;
     return this;
   }
 
+  @Override
   public Formatter getFormatter() {
     return (this.formatter != null) ? this.formatter : getUnits();
   }
@@ -272,15 +274,6 @@ public abstract class LXModulator extends LXRunnableComponent implements LXCompo
    */
   public final double getValue() {
     return this.value;
-  }
-
-  /**
-   * Retrieves the current value of the modulator in floating point precision.
-   *
-   * @return Current value of the modulator, cast to float
-   */
-  public final float getValuef() {
-    return (float) this.getValue();
   }
 
   /**

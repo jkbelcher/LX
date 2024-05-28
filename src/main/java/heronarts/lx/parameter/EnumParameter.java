@@ -18,13 +18,10 @@
 
 package heronarts.lx.parameter;
 
-public class EnumParameter<T> extends ObjectParameter<T> {
+public class EnumParameter<T extends Enum<?>> extends ObjectParameter<T> {
 
   @SuppressWarnings("unchecked")
-  private static <T> T[] valuesFor(T o) {
-    if (!(o instanceof Enum)) {
-      throw new IllegalArgumentException("Must pass Enum value to EnumParameter");
-    }
+  static <T> T[] valuesFor(T o) {
     try {
       return (T[]) o.getClass().getMethod("values").invoke(null);
     } catch (Exception x) {

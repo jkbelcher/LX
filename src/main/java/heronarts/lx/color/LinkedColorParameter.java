@@ -18,7 +18,6 @@
 
 package heronarts.lx.color;
 
-import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXParameter;
 
@@ -44,9 +43,7 @@ public class LinkedColorParameter extends ColorParameter {
     new EnumParameter<Mode>("Mode", Mode.STATIC)
     .setDescription("Whether to use a custom color or a fixed palette swatch index");
 
-  public final DiscreteParameter index =
-    new DiscreteParameter("Index", 1, LXSwatch.MAX_COLORS + 1)
-    .setDescription("Which color index in the palette to use");
+  public final LXPalette.IndexSelector index = new LXPalette.IndexSelector("Index");
 
   public LinkedColorParameter(String label) {
     this(label, 0xff000000);
@@ -61,6 +58,16 @@ public class LinkedColorParameter extends ColorParameter {
   @Override
   public LinkedColorParameter setDescription(String description) {
     return (LinkedColorParameter) super.setDescription(description);
+  }
+
+  public LinkedColorParameter setMode(Mode mode) {
+    this.mode.setValue(mode);
+    return this;
+  }
+
+  public LinkedColorParameter setIndex(int index) {
+    this.index.setValue(index);
+    return this;
   }
 
   public LXDynamicColor getPaletteColor() {
@@ -78,6 +85,7 @@ public class LinkedColorParameter extends ColorParameter {
 
   // Returns the real-time value of the color, which may be different from what
   // getColor() returns if there are LFOs/etc being applied.
+  @Override
   public int calcColor() {
     switch (this.mode.getEnum()) {
     case PALETTE:

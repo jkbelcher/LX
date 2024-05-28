@@ -37,13 +37,11 @@ public class DissolveBlend extends LXBlend {
   @Override
   public void blend(int[] dst, int[] src, double alpha, int[] output, LXModel model) {
     // Multiply the src alpha only by half!
-    final int srcAlpha = (int) (alpha * 0x80);
-    final int dstAlpha = 0x100 - srcAlpha;
+    final int srcAlpha = (int) (alpha * LXColor.BLEND_ALPHA_HALF);
+    final int dstAlpha = LXColor.BLEND_ALPHA_FULL - srcAlpha;
     for (LXPoint p : model.points) {
       final int i = p.index;
-      output[i] = 0xff << LXColor.ALPHA_SHIFT |
-          ((dst[i] & LXColor.RB_MASK) * dstAlpha + (src[i] & LXColor.RB_MASK) * srcAlpha) >>> 8 & LXColor.RB_MASK |
-          ((dst[i] & LXColor.G_MASK) * dstAlpha + (src[i] & LXColor.G_MASK) * srcAlpha) >>> 8 & LXColor.G_MASK;
+      output[i] = LXColor.add(LXColor.add(LXColor.CLEAR, dst[i], dstAlpha), src[i], srcAlpha);
     }
   }
 }

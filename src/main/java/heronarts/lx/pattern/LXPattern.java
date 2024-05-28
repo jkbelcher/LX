@@ -163,7 +163,6 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     new CompoundParameter("Composite Level", 1)
     .setDescription("Alpha level to composite pattern at when in channel blend mode");
 
-
   public final BooleanParameter hasCustomCycleTime =
     new BooleanParameter("Custom Cycle", false)
     .setDescription("When enabled, this pattern uses its own custom duration rather than the default cycle time");
@@ -179,11 +178,9 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
   private final LXParameterListener onEnabled = p -> {
     final boolean isEnabled = this.enabled.isOn();
     final LXChannel channel = getChannel();
-    if ((channel != null) && (channel.compositeMode.getEnum() == LXChannel.CompositeMode.BLEND)) {
-      if (isEnabled) {
-        channel.onPatternEnabled(this);
-      }
-      if (!channel.compositeDampingEnabled.isOn()) {
+    if (channel != null) {
+      channel.onPatternEnabled(this);
+      if (channel.isComposite() && !channel.compositeDampingEnabled.isOn()) {
         if (isEnabled) {
           _activate();
         } else {
@@ -238,6 +235,16 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
   }
 
   @Override
+  public boolean isSnapshotControl(LXParameter parameter) {
+    return !(
+      parameter == this.recall ||
+      parameter == this.enabled ||
+      parameter == this.hasCustomCycleTime ||
+      parameter == this.customCycleTimeSecs
+    ) && super.isSnapshotControl(parameter);
+  }
+
+  @Override
   public boolean isHiddenControl(LXParameter parameter) {
     return
       parameter == this.recall ||
@@ -257,7 +264,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
   public void updateCompositeBlendOptions() {
     for (LXBlend blend : this.compositeMode.getObjects()) {
       if (blend != null) {
-        blend.dispose();
+        LX.dispose(blend);
       }
     }
     this.compositeMode.setObjects(this.lx.engine.mixer.instantiateChannelBlends());
@@ -447,7 +454,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
       for (Listener listener : this.listeners) {
         listener.effectRemoved(this, effect);
       }
-      effect.dispose();
+      LX.dispose(effect);
     }
     return this;
   }
@@ -535,7 +542,10 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     this.runMs += deltaMs;
     this.run(deltaMs);
     this.profiler.runNanos = System.nanoTime() - runStart;
+  }
 
+  @Override
+  protected final void applyEffects(double deltaMs) {
     long effectStart = System.nanoTime();
     if (!this.mutableEffects.isEmpty()) {
       for (LXEffect effect : this.mutableEffects) {
@@ -628,6 +638,12 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
   }
 
+  private void removeEffects() {
+    for (int i = this.mutableEffects.size() - 1; i >= 0; --i) {
+      removeEffect(this.mutableEffects.get(i));
+    }
+  }
+
   private static final String KEY_EFFECTS = "effects";
 
   @Override
@@ -638,10 +654,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   @Override
   public void load(LX lx, JsonObject obj) {
-    // Remove effects
-    for (int i = this.mutableEffects.size() - 1; i >= 0; --i) {
-      removeEffect(this.mutableEffects.get(i));
-    }
+    removeEffects();
 
     // Add the effects
     if (obj.has(KEY_EFFECTS)) {
@@ -674,6 +687,8 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   @Override
   public void dispose() {
+    removeEffects();
+
     this.enabled.removeListener(this.onEnabled);
     this.compositeMode.removeListener(this.onCompositeMode);
     super.dispose();

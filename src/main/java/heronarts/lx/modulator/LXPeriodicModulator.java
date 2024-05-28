@@ -56,7 +56,6 @@ public abstract class LXPeriodicModulator extends LXModulator {
     new BooleanParameter("Lock", true)
     .setDescription("Whether this modulator is locked to the beat grid or free-running");
 
-
   /**
    * Whether the modulator finished on this cycle.
    */
@@ -109,6 +108,7 @@ public abstract class LXPeriodicModulator extends LXModulator {
     addParameter("tempoSync", this.tempoSync);
     addParameter("tempoMultiplier", this.tempoDivision);
     addParameter("tempoLock", this.tempoLock);
+    this.tempoDivision.setWrappable(false);
     this.period = period;
   }
 
@@ -262,7 +262,7 @@ public abstract class LXPeriodicModulator extends LXModulator {
     super.loop(deltaMs);
   }
 
-  private int lastMeasure = 0;
+  private int previousCycle = 0;
 
   @Override
   protected final double computeValue(double deltaMs) {
@@ -270,35 +270,35 @@ public abstract class LXPeriodicModulator extends LXModulator {
     this.looped = false;
     this.numLoops = 0;
     this.needsReset = false;
-    double periodv = this.period.getValue();
+    final double periodv = this.period.getValue();
     if (this.tempoSync.isOn()) {
       if (this.tempoLock.isOn()) {
-        double rawBasis = this.lx.engine.tempo.getBasis(this.tempoDivision.getEnum(), false);
-        int measure = (int) rawBasis;
-        this.basis = rawBasis % 1.;
+        final Tempo.Division division = this.tempoDivision.getEnum();
+        final int cycle = this.lx.engine.tempo.getCycleCount(division);
+        this.basis = this.lx.engine.tempo.getBasis(division);
         if (this.reset) {
           // No-op, just let the lastMeasure value be updated beneath, resets
           // of tempo synced modulators shouldn't be treated as having finished
           // their loop... the tempo is always running continuously in the background
         } else if (this.restarted) {
           this.restarted = false;
-        } else if (measure != this.lastMeasure) {
+        } else if (cycle != this.previousCycle) {
           if (this.looping.isOn()) {
             this.looped = true;
-            this.numLoops = (measure > this.lastMeasure) ? (measure - this.lastMeasure) : 1;
+            this.numLoops = (cycle > this.previousCycle) ? (cycle - this.previousCycle) : 1;
           } else {
             this.basis = 1.;
             // NOTE - code path below for basis >= 1 will set finished/needsReset and stop()
           }
         }
-        this.lastMeasure = measure;
+        this.previousCycle = cycle;
       } else {
         this.basis += deltaMs / this.lx.engine.tempo.period.getValue() * this.tempoDivision.getEnum().multiplier;
       }
     } else if (periodv == 0) {
       this.basis = 1;
     } else {
-      this.basis += deltaMs / this.period.getValue();
+      this.basis += deltaMs / periodv;
     }
 
     if (this.basis >= 1.) {

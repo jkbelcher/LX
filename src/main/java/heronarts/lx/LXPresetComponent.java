@@ -16,32 +16,20 @@
  * @author Mark C. Slee <mark@heronarts.com>
  */
 
-package heronarts.lx.midi;
+package heronarts.lx;
 
-public abstract class LXAbstractMidiListener implements LXMidiListener {
+import com.google.gson.JsonObject;
 
-  @Override
-  public void noteOnReceived(MidiNoteOn note) {
+public interface LXPresetComponent {
+
+  /**
+   * Presets by default contain the results of a normal save() call,
+   * but we may not always want all of the information contained.
+   * This method post-processes the JSON object before writing to disk.
+   */
+  public default void postProcessPreset(LX lx, JsonObject obj) {}
+
+  public default Class<?> getPresetClass() {
+    return getClass();
   }
-
-  @Override
-  public void noteOffReceived(MidiNote note) {
-  }
-
-  @Override
-  public void controlChangeReceived(MidiControlChange cc) {
-  }
-
-  @Override
-  public void programChangeReceived(MidiProgramChange pc) {
-  }
-
-  @Override
-  public void pitchBendReceived(MidiPitchBend pitchBend) {
-  }
-
-  @Override
-  public void aftertouchReceived(MidiAftertouch aftertouch) {
-  }
-
 }

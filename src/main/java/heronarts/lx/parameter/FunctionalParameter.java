@@ -26,11 +26,34 @@ import heronarts.lx.LXComponent;
  */
 public abstract class FunctionalParameter implements LXParameter {
 
+  public interface Interface {
+    public double getValue();
+  }
+
+  public static FunctionalParameter create(String label, Interface iface) {
+    return new FunctionalParameter(label) {
+      @Override
+      public double getValue() {
+        return iface.getValue();
+      }
+    };
+  }
+
+  public static FunctionalParameter create(Interface iface) {
+    return new FunctionalParameter() {
+      @Override
+      public double getValue() {
+        return iface.getValue();
+      }
+    };
+  }
+
   private final String label;
   protected String description = null;
 
   private LXComponent parent;
   private String path;
+  private Formatter formatter = null;
 
   protected FunctionalParameter() {
     this("FUNC-PARAM");
@@ -80,7 +103,13 @@ public abstract class FunctionalParameter implements LXParameter {
 
   @Override
   public Formatter getFormatter() {
-    return getUnits();
+    return (this.formatter != null) ? this.formatter : getUnits();
+  }
+
+  @Override
+  public FunctionalParameter setFormatter(Formatter formatter) {
+    this.formatter = formatter;
+    return this;
   }
 
   @Override
@@ -114,15 +143,6 @@ public abstract class FunctionalParameter implements LXParameter {
    * @return Parameter value
    */
   public abstract double getValue();
-
-  /**
-   * Utility helper function to get the value of the parameter as a float.
-   *
-   * @return Parameter value as float
-   */
-  public float getValuef() {
-    return (float) getValue();
-  }
 
   /**
    * Gets the label for this parameter

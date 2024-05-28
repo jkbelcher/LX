@@ -14,7 +14,7 @@
  * PURPOSE, WITH RESPECT TO THE SOFTWARE.
  *
  * @author Mark C. Slee <mark@heronarts.com>
- * @author Justin K. Blecher <jkbelcher@gmail.com>
+ * @author Justin K. Belcher <jkbelcher@gmail.com>
  */
 
 package heronarts.lx.snapshot;
@@ -62,7 +62,7 @@ public class LXGlobalSnapshot extends LXSnapshot implements LXComponent.Renamabl
 
 
   public LXGlobalSnapshot(LX lx) {
-    super(lx);
+    super(lx, null);
     setParent(lx.engine.snapshots);
     addParameter("recall", this.recall);
     addParameter("autoCycleEligible", this.autoCycleEligible);
@@ -117,9 +117,9 @@ public class LXGlobalSnapshot extends LXSnapshot implements LXComponent.Renamabl
     addParameterView(ViewScope.OUTPUT, lx.engine.output.brightness);
     addParameterView(ViewScope.MIXER, lx.engine.mixer.crossfader);
     for (LXAbstractChannel bus : lx.engine.mixer.channels) {
-      initializeBus(bus);
+      initializeGlobalBus(bus);
     }
-    initializeBus(lx.engine.mixer.masterBus);
+    initializeGlobalBus(lx.engine.mixer.masterBus);
 
     // Modulator settings
     for (LXModulator modulator : lx.engine.modulation.getModulators()) {

@@ -35,7 +35,6 @@ import heronarts.lx.pattern.color.SolidPattern;
 import heronarts.lx.scheduler.LXScheduler;
 import heronarts.lx.structure.LXFixture;
 import heronarts.lx.structure.LXStructure;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
@@ -68,7 +67,7 @@ import com.google.gson.stream.JsonWriter;
  */
 public class LX {
 
-  public static final String VERSION = "0.4.2.TE.7-SNAPSHOT";
+  public static final String VERSION = "1.0.1.TE.1-SNAPSHOT";
 
   public static class InstantiationException extends Exception {
 
@@ -97,19 +96,37 @@ public class LX {
 
     public static final int UNLIMITED_POINTS = -1;
 
+    public boolean isEulaRequired();
+
     public boolean canSave();
-    public int getMaxPoints();
+
+    public int getMaxOutputPoints();
+
+    public int getMaxRenderPoints();
+
     public boolean canRunPlugins();
+
     public boolean hasPackageLicense(String packageName);
 
     public static Permissions UNRESTRICTED = new Permissions() {
+
+      @Override
+      public boolean isEulaRequired() {
+        return false;
+      }
+
       @Override
       public boolean canSave() {
         return true;
       }
 
       @Override
-      public int getMaxPoints() {
+      public int getMaxOutputPoints() {
+        return UNLIMITED_POINTS;
+      }
+
+      @Override
+      public int getMaxRenderPoints() {
         return UNLIMITED_POINTS;
       }
 
@@ -126,6 +143,28 @@ public class LX {
   }
 
   public static class Flags {
+
+    /**
+     * Specifies how the state of live output is restored when a project
+     * is loaded.
+     */
+    public enum OutputMode {
+      /**
+       * Restore the setting stored in the project
+       */
+      PROJECT,
+
+      /**
+       * Always enable Live output when loading a project
+       */
+      ACTIVE,
+
+      /**
+       * Always suppress Live output when loading a project
+       */
+      INACTIVE;
+    }
+
     /**
      * Sometimes we need to know if we are P4LX, but we don't want LX library to have
      * any dependency upon P4LX.
@@ -135,6 +174,8 @@ public class LX {
     public boolean focusChannelOnCue = false;
     public boolean focusActivePattern = false;
     public boolean sendCueToOutput = false;
+    public boolean autosave = false;
+    public long autosaveIntervalMs = 15000;
     public boolean zeroconf = false;
     public String zeroconfServiceName = "LX";
     public LXEngine.ThreadMode threadMode = LXEngine.ThreadMode.SCHEDULED_EXECUTOR_SERVICE;
@@ -144,6 +185,7 @@ public class LX {
     public boolean loadPreferences = true;
     public List<String> enabledPlugins = new ArrayList<String>();
     public List<String> classpathPlugins = new ArrayList<String>();
+    public OutputMode outputMode = OutputMode.PROJECT;
   }
 
   public static enum Media {
@@ -151,10 +193,13 @@ public class LX {
     FIXTURES("Fixtures"),
     PROJECTS("Projects"),
     MODELS("Models"),
+    VIEWS("Views"),
     PRESETS("Presets"),
     SCRIPTS("Scripts"),
     COLORS("Colors"),
+    MIDI_MAPPINGS("MIDI Mappings"),
     LOGS("Logs"),
+    AUTOSAVE("Autosave"),
     DELETED("Deleted");
 
     private final String dirName;
@@ -168,7 +213,11 @@ public class LX {
     }
 
     private boolean isBootstrap() {
-      return (this != DELETED);
+      switch (this) {
+      case AUTOSAVE: return false;
+      case DELETED: return false;
+      default: return true;
+      }
     }
   }
 
@@ -272,6 +321,13 @@ public class LX {
     default public void modelGenerationChanged(LX lx, LXModel model) {}
   }
 
+  /**
+   * Listener for any type of model change
+   */
+  public interface ModelListener {
+    public void modelChanged(LXModel model);
+  }
+
   private final List<Listener> listeners = new ArrayList<Listener>();
 
   public interface ProjectListener {
@@ -303,7 +359,7 @@ public class LX {
   /**
    * Permissions
    */
-  public final Permissions permissions = getPermissions();
+  public final Permissions permissions = getPermissions();;
 
   protected Permissions getPermissions() {
     return Permissions.UNRESTRICTED;
@@ -393,13 +449,7 @@ public class LX {
     this.flags.immutableModel = (model != null);
 
     // Create structure object
-    this.structure = new LXStructure(this, model);
-    if (model == null) {
-      this.model = this.structure.getModel();
-    } else {
-      this.model = model;
-    }
-    this.structure.setModelListener(new LXStructure.ModelListener() {
+    this.structure = new LXStructure(this, model, new LXStructure.ModelListener() {
       public void structureChanged(LXModel model) {
         setModel(model);
       }
@@ -409,6 +459,11 @@ public class LX {
         }
       }
     });
+    if (model == null) {
+      this.model = this.structure.getModel();
+    } else {
+      this.model = model;
+    }
     LX.initProfiler.log("Model");
 
     // Custom content loader
@@ -420,6 +475,8 @@ public class LX {
     this.preferences = new LXPreferences(this);
     if (this.flags.loadPreferences) {
       this.preferences.load();
+    } else {
+      this.preferences.loadEULA();
     }
 
     // Scheduler
@@ -530,6 +587,39 @@ public class LX {
     return this;
   }
 
+  /**
+   * Registers and returns listener to fire on any change to the model
+   *
+   * @param listener Model listener for changes to model structure and/or geometry
+   * @return The registered listener
+   */
+  public LX.Listener onModelChanged(LX.ModelListener listener) {
+    return onModelChanged(listener, false);
+  }
+
+  /**
+   * Registers a permanent listener to fire on any change to the model
+   *
+   * @param listener Model listener for changes to model structure and/or geometry
+   * @param fire Whether to fire the listener immeediately
+   * @return The registered listener
+   */
+  public LX.Listener onModelChanged(LX.ModelListener listener, boolean fire) {
+    final Listener ret = new Listener() {
+      public void modelChanged(LX lx, LXModel model) {
+        listener.modelChanged(model);
+      }
+      public void modelGenerationChanged(LX lx, LXModel model) {
+        listener.modelChanged(model);
+      }
+    };
+    addListener(ret);
+    if (fire) {
+      listener.modelChanged(getModel());
+    }
+    return ret;
+  }
+
   public LX addProjectListener(ProjectListener listener) {
     Objects.requireNonNull(listener);
     if (this.projectListeners.contains(listener)) {
@@ -601,11 +691,21 @@ public class LX {
   }
 
   /**
+   * Dispose of a component, with an assertion that the disposal
+   * succeeds and the base class LXComponent.dispose() method was called.
+   *
+   * @param component Component to dispose
+   */
+  public static void dispose(LXComponent component) {
+    component.dispose();
+    LXComponent.assertDisposed(component);
+  }
+
+  /**
    * Shut down resources of the LX instance.
    */
   public void dispose() {
-    this.registry.disposePlugins();
-    this.engine.dispose();
+    LX.dispose(this.engine);
   }
 
   /**
@@ -852,6 +952,7 @@ public class LX {
 
   public final static String KEY_VERSION = "version";
   public final static String KEY_TIMESTAMP = "timestamp";
+
   private final static String KEY_MODEL = "model";
   private final static String KEY_ENGINE = "engine";
   private final static String KEY_EXTERNALS = "externals";
@@ -874,6 +975,37 @@ public class LX {
     return this.file;
   }
 
+  private File getAutoSaveFile() {
+    if (this.file != null) {
+      return getMediaFile(Media.AUTOSAVE, this.file.getName());
+    } else {
+      return getMediaFile(Media.AUTOSAVE, "default.lxp");
+    }
+  }
+
+  public void autoSaveProject() {
+    if (!this.permissions.canSave()) {
+      return;
+    }
+
+    final File autosave = getAutoSaveFile();
+    if (autosave != null) {
+      // Need to serialize the data here on the engine thread
+      final JsonObject obj = saveProjectJson();
+
+      // Write the file on another thread to avoid main thread jitter
+      new Thread(() -> {
+        try (JsonWriter writer = new JsonWriter(new FileWriter(autosave))) {
+          writer.setIndent("  ");
+          new GsonBuilder().create().toJson(obj, writer);
+          LX.log("Project auto-saved successfully to " + autosave.toString());
+        } catch (IOException iox) {
+          LX.error(iox, "Could not auto-save project to output file: " + autosave.toString());
+        }
+      }).start();
+    }
+  }
+
   public void saveProject() {
     if (this.file != null) {
       saveProject(this.file);
@@ -885,16 +1017,7 @@ public class LX {
       return;
     }
 
-    JsonObject obj = new JsonObject();
-    obj.addProperty(KEY_VERSION, LX.VERSION);
-    obj.addProperty(KEY_TIMESTAMP, System.currentTimeMillis());
-    obj.add(KEY_MODEL, LXSerializable.Utils.toObject(this, this.structure));
-    obj.add(KEY_ENGINE, LXSerializable.Utils.toObject(this, this.engine));
-    JsonObject externalsObj = new JsonObject();
-    for (String key : this.externals.keySet()) {
-      externalsObj.add(key, LXSerializable.Utils.toObject(this, this.externals.get(key)));
-    }
-    obj.add(KEY_EXTERNALS, externalsObj);
+    JsonObject obj = saveProjectJson();
     try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
       writer.setIndent("  ");
       new GsonBuilder().create().toJson(obj, writer);
@@ -905,6 +1028,22 @@ public class LX {
     } catch (IOException iox) {
       LX.error(iox, "Could not write project to output file: " + file.toString());
     }
+
+    confirmModelSaved();
+  }
+
+  private JsonObject saveProjectJson() {
+    JsonObject obj = new JsonObject();
+    obj.addProperty(KEY_VERSION, LX.VERSION);
+    obj.addProperty(KEY_TIMESTAMP, System.currentTimeMillis());
+    obj.add(KEY_MODEL, LXSerializable.Utils.toObject(this, this.structure));
+    obj.add(KEY_ENGINE, LXSerializable.Utils.toObject(this, this.engine));
+    JsonObject externalsObj = new JsonObject();
+    for (String key : this.externals.keySet()) {
+      externalsObj.add(key, LXSerializable.Utils.toObject(this, this.externals.get(key)));
+    }
+    obj.add(KEY_EXTERNALS, externalsObj);
+    return obj;
   }
 
   public LX registerExternal(String key, LXSerializable serializable) {
@@ -1026,6 +1165,19 @@ public class LX {
     confirm.run();
   }
 
+  protected final void confirmModelSaved() {
+    if (this.structure.isExternalModel() && this.structure.isDirty()) {
+      final File file = this.structure.getModelFile();
+      showConfirmUnsavedModelDialog(file, () -> {
+        this.structure.exportModel(file);
+      });
+    }
+  }
+
+  protected void showConfirmUnsavedModelDialog(File file, Runnable confirm) {
+    // Subclasses can handle this if they have a UI and prompt to save
+  }
+
   /**
    * Get the root media path for storage of LX-related objects and extensions
    *
@@ -1125,16 +1277,20 @@ public class LX {
    * @param device Device
    * @return Folder that holds presets for this device
    */
-  public File getPresetFolder(LXDeviceComponent device) {
+  public File getPresetFolder(LXComponent device) {
     File presetFolder = getMediaFolder(Media.PRESETS);
-    File deviceFolder = new File(presetFolder, device.getClass().getName());
+    Class<?> deviceClass = device.getClass();
+    if (device instanceof LXPresetComponent) {
+      deviceClass = ((LXPresetComponent) device).getPresetClass();
+    }
+    File deviceFolder = new File(presetFolder, deviceClass.getName());
     if (!deviceFolder.exists()) {
       deviceFolder.mkdir();
     }
     return deviceFolder;
   }
 
-  public File getPresetFile(LXDeviceComponent device, String name) {
+  public File getPresetFile(LXComponent device, String name) {
     return new File(getPresetFolder(device), (name != null) ? name : "default.lxd");
   }
 
@@ -1331,6 +1487,10 @@ public class LX {
 
   static File EXPLICIT_LOG_FILE = null;
   private static PrintStream EXPLICIT_LOG_STREAM = null;
+
+  public static File getLogFile() {
+    return EXPLICIT_LOG_FILE;
+  }
 
   public static void setLogFile(File file) {
     try {

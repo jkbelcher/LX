@@ -36,6 +36,7 @@ import heronarts.lx.model.LXModel;
 import heronarts.lx.model.LXPoint;
 import heronarts.lx.output.ArtNetDatagram;
 import heronarts.lx.output.DDPDatagram;
+import heronarts.lx.output.IndexBuffer;
 import heronarts.lx.output.KinetDatagram;
 import heronarts.lx.output.LXBufferOutput;
 import heronarts.lx.output.LXOutput;
@@ -140,8 +141,14 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     // Length of the index buffer (# of color index values))
     protected final int length;
 
-    // Total number of single-byte channels (# of individual color output bytes)
+    // Total number of single-byte channels (# of individual color output bytes, does not include prefix/suffix)
     protected final int numChannels;
+
+    // Static bytes to prefix the output with
+    protected final byte[] headerBytes;
+
+    // Static bytes to suffix the output with
+    protected final byte[] footerBytes;
 
     private final FunctionalParameter brightness = new FunctionalParameter() {
       @Override
@@ -173,21 +180,37 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     }
 
     protected Segment(int start, int num, int stride, int repeat, boolean reverse, LXBufferOutput.ByteEncoder byteEncoder) {
-      this.length = num * repeat;
+      this(start, num, stride, repeat, 0, 0, reverse, byteEncoder);
+    }
+
+    protected Segment(int start, int num, int stride, int repeat, int padPre, int padPost, boolean reverse, LXBufferOutput.ByteEncoder byteEncoder) {
+      this(start, num, stride, repeat, padPre, padPost, reverse, byteEncoder, null, null);
+    }
+
+    protected Segment(int start, int num, int stride, int repeat, int padPre, int padPost, boolean reverse, LXBufferOutput.ByteEncoder byteEncoder, byte[] headerBytes, byte[] footerBytes) {
+      this.length = num * repeat + padPre + padPost;
       this.indexBuffer = new int[this.length];
       if (reverse) {
         start = start + stride * (num-1);
         stride = -stride;
       }
       int i = 0;
+      for (int p = 0; p < padPre; ++p) {
+        this.indexBuffer[i++] = IndexBuffer.EMPTY_PIXEL;
+      }
       for (int s = 0; s < num; ++s) {
         final int index = start + s * stride;
         for (int r = 0; r < repeat; ++r) {
           this.indexBuffer[i++] = index;
         }
       }
+      for (int p = 0; p < padPost; ++p) {
+        this.indexBuffer[i++] = IndexBuffer.EMPTY_PIXEL;
+      }
       this.byteEncoder = byteEncoder;
       this.numChannels = this.length * byteEncoder.getNumBytes();
+      this.headerBytes = headerBytes;
+      this.footerBytes = footerBytes;
     }
 
     /**
@@ -199,9 +222,11 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
      */
     protected Segment(int[] indexBuffer, LXBufferOutput.ByteEncoder byteEncoder) {
       this.indexBuffer = indexBuffer;
-      this.byteEncoder = byteEncoder;
       this.length = indexBuffer.length;
+      this.byteEncoder = byteEncoder;
       this.numChannels = indexBuffer.length * byteEncoder.getNumBytes();
+      this.headerBytes = null;
+      this.footerBytes = null;
     }
 
     /**
@@ -214,7 +239,8 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     protected int[] toIndexBuffer(int start, int len) {
       int[] indices = new int[len];
       for (int i = 0; i < len; ++i) {
-        indices[i] = getPoint(this.indexBuffer[start + i]).index;
+        int localIndex = this.indexBuffer[start + i];
+        indices[i] = (localIndex == IndexBuffer.EMPTY_PIXEL) ? IndexBuffer.EMPTY_PIXEL : getPoint(localIndex).index;
       }
       return indices;
     }
@@ -245,10 +271,11 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     protected final int channel;
     protected final int priority;
     protected final boolean sequenceEnabled;
+    protected final KinetDatagram.Version kinetVersion;
     protected final float fps;
     protected final Segment[] segments;
 
-    public OutputDefinition(Protocol protocol, Transport transport, InetAddress address, int port, int universe, int channel, int priority, boolean sequenceEnabled, float fps, Segment ... segments) {
+    public OutputDefinition(Protocol protocol, Transport transport, InetAddress address, int port, int universe, int channel, int priority, boolean sequenceEnabled, KinetDatagram.Version kinetVersion, float fps, Segment ... segments) {
       this.protocol = protocol;
       this.transport = transport;
       this.address = address;
@@ -256,6 +283,7 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
       this.universe = universe;
       this.channel = channel;
       this.priority = priority;
+      this.kinetVersion = kinetVersion;
       this.sequenceEnabled = sequenceEnabled;
       this.fps = fps;
       this.segments = segments;
@@ -285,7 +313,7 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     }
   }
 
-  private static final double POSITION_RANGE = 1000000;
+  public static final double POSITION_RANGE = 1000000;
 
   public final BooleanParameter selected =
     new BooleanParameter("Selected", false)
@@ -671,7 +699,7 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     // Clear output definitions and dispose of direct outputs
     this.outputDefinitions.clear();
     for (LXOutput output : this.outputsDirect) {
-      output.dispose();
+      LX.dispose(output);
     }
     this.mutableOutputsDirect.clear();
 
@@ -1240,10 +1268,10 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
   @Override
   public void dispose() {
     for (LXFixture child : this.children) {
-      child.dispose();
+      LX.dispose(child);
     }
     for (LXOutput output : this.outputsDirect) {
-      output.dispose();
+      LX.dispose(output);
     }
     this.mutableOutputsDirect.clear();
     this.outputDefinitions.clear();

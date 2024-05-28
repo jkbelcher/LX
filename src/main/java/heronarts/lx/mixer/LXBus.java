@@ -21,6 +21,7 @@ package heronarts.lx.mixer;
 import heronarts.lx.LX;
 import heronarts.lx.LXModelComponent;
 import heronarts.lx.LXModulatorComponent;
+import heronarts.lx.LXPresetComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.clip.LXClip;
 import heronarts.lx.clip.LXClipEngine;
@@ -30,6 +31,7 @@ import heronarts.lx.osc.LXOscEngine;
 import heronarts.lx.osc.OscMessage;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.CompoundParameter;
+import heronarts.lx.parameter.TriggerParameter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +46,7 @@ import com.google.gson.JsonObject;
  * Abstract representation of a channel, which could be a normal channel with patterns
  * or the master channel.
  */
-public abstract class LXBus extends LXModelComponent implements LXOscComponent {
+public abstract class LXBus extends LXModelComponent implements LXPresetComponent, LXOscComponent {
 
   /**
    * Listener interface for objects which want to be notified when the internal
@@ -97,6 +99,10 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
     new BooleanParameter("Selected")
     .setDescription("Whether the channel is selected");
 
+  public final TriggerParameter stopClips =
+    new TriggerParameter("Stop Clips", this::stopClips)
+    .setDescription("Stops all clips running on the bus");
+
   public final BooleanParameter controlsExpandedCue =
     new BooleanParameter("Expanded Cue", true)
     .setDescription("Whether the control elements for this channel are expanded in cue view");
@@ -125,6 +131,7 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
     addArray("clip", this.clips);
     addParameter("arm", this.arm);
     addParameter("selected", this.selected);
+    addParameter("stopClips", this.stopClips);
     addInternalParameter("controlsExpandedCue", this.controlsExpandedCue);
     addInternalParameter("controlsExpandedAux", this.controlsExpandedAux);
   }
@@ -266,7 +273,7 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
       for (Listener listener : this.listeners) {
         listener.effectRemoved(this, effect);
       }
-      effect.dispose();
+      LX.dispose(effect);
     }
     return this;
   }
@@ -275,6 +282,7 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
     if (!this.effects.contains(effect)) {
       throw new IllegalStateException("Cannot reload effect not on a channel");
     }
+    // TODO(mcslee): Collect and restore global modulations to this effect!
     int index = effect.getIndex();
     JsonObject effectObj = new JsonObject();
     effect.save(getLX(), effectObj);
@@ -405,7 +413,7 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
       for (ClipListener listener : this.clipListeners) {
         listener.clipRemoved(this, clip);
       }
-      clip.dispose();
+      LX.dispose(clip);
     }
   }
 
@@ -436,7 +444,7 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
   protected void disposeClips() {
     for (LXClip clip : this.mutableClips) {
       if (clip != null) {
-        clip.dispose();
+        LX.dispose(clip);
       }
     }
     this.mutableClips.clear();
@@ -446,12 +454,25 @@ public abstract class LXBus extends LXModelComponent implements LXOscComponent {
   public void dispose() {
     disposeClips();
     for (LXEffect effect : this.mutableEffects) {
-      effect.dispose();
+      LX.dispose(effect);
     }
     this.mutableEffects.clear();
     this.listeners.clear();
     this.clipListeners.clear();
     super.dispose();
+  }
+
+  @Override
+  public Class<?> getPresetClass() {
+    // groups and the master bus can be interchangeable
+    return LXBus.class;
+  }
+
+  @Override
+  public void postProcessPreset(LX lx, JsonObject obj) {
+    LXSerializable.Utils.stripParameter(obj, this.fader);
+    LXSerializable.Utils.stripParameter(obj, this.arm);
+    LXSerializable.Utils.stripParameter(obj, this.selected);
   }
 
   private static final String KEY_EFFECTS = "effects";

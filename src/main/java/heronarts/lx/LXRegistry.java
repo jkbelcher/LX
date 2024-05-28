@@ -139,8 +139,12 @@ public class LXRegistry implements LXSerializable {
   private static final List<Class<? extends LXEffect>> DEFAULT_EFFECTS;
   static {
     DEFAULT_EFFECTS = new ArrayList<Class<? extends LXEffect>>();
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.audio.SoundObjectEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.BlurEffect.class);
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.FreezeEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.color.ColorizeEffect.class);
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.color.ColorMaskEffect.class);
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.color.GradientMaskEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.DynamicsEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.InvertEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.HueSaturationEffect.class);
@@ -155,8 +159,10 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_MODULATORS.add(heronarts.lx.audio.BandGate.class);
     DEFAULT_MODULATORS.add(heronarts.lx.audio.SoundObject.class);
     DEFAULT_MODULATORS.add(heronarts.lx.dmx.DmxModulator.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.dmx.DmxColorModulator.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.BooleanLogic.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.ComparatorModulator.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.CycleModulator.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Damper.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Interval.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MacroKnobs.class);
@@ -374,7 +380,7 @@ public class LXRegistry implements LXSerializable {
     public LXPlugin instance = null;
     private boolean hasError = false;
     private boolean isEnabled = false;
-    private Exception exception = null;
+    private Throwable exception = null;
     private final boolean cliEnabled;
 
     private Plugin(Class<? extends LXPlugin> clazz) {
@@ -440,14 +446,14 @@ public class LXRegistry implements LXSerializable {
           this.instance = clazz.getConstructor().newInstance();
         }
         this.instance.initialize(lx);
-      } catch (Exception x) {
-        LX.error(x, "Unhandled exception in plugin initialize: " + clazz.getName());
+      } catch (Throwable x) {
+        LX.error(x, "Unhandled error in plugin initialize: " + clazz.getName());
         lx.pushError(x, "Error on initialization of plugin " + clazz.getSimpleName() + "\n" + x.getLocalizedMessage());
         setException(x);
       }
     }
 
-    public Plugin setException(Exception x) {
+    public Plugin setException(Throwable x) {
       this.hasError = true;
       this.exception = x;
       for (Listener listener : listeners) {
@@ -456,7 +462,7 @@ public class LXRegistry implements LXSerializable {
       return this;
     }
 
-    public Exception getException() {
+    public Throwable getException() {
       return this.exception;
     }
 

@@ -22,6 +22,7 @@ import heronarts.lx.LX;
 import heronarts.lx.transform.LXMatrix;
 import heronarts.lx.transform.LXTransform;
 import heronarts.lx.transform.LXVector;
+import heronarts.lx.utils.LXUtils;
 
 /**
  * A point is a node with a position in space. In addition to basic
@@ -124,7 +125,7 @@ public class LXPoint {
 
   /**
    * Normalized position of point in radial space from center of model,
-   * 0 is center, 1 is max radius from center
+   * 0 is center, 1 is point with max radius from center
    */
   public float rcn = 0;
 
@@ -290,6 +291,9 @@ public class LXPoint {
     this.zn = that.zn;
     this.rn = that.rn;
 
+    this.rc = that.rc;
+    this.rcn = that.rcn;
+
     return this;
   }
 
@@ -357,17 +361,49 @@ public class LXPoint {
   /**
    * Sets the normalized values on this point, relative to a model
    *
-   * @param model Model to normalize points relative to
+   * @param bounds Model to normalize points relative to
    */
-  void normalize(LXModel model) {
-    this.xn = (model.xRange == 0) ? .5f : (this.x - model.xMin) / model.xRange;
-    this.yn = (model.yRange == 0) ? .5f : (this.y - model.yMin) / model.yRange;
-    this.zn = (model.zRange == 0) ? .5f : (this.z - model.zMin) / model.zRange;
-    this.rn = (model.rMax == 0) ? .5f : this.r / model.rMax;
+  void normalize(LXNormalizationBounds bounds, LXModel model) {
+    this.xn = xn(bounds);
+    this.yn = yn(bounds);
+    this.zn = zn(bounds);
+    this.rn = (model.rMax == 0) ? 0f : this.r / model.rMax;
+    this.rc = LXUtils.distf(this.x, this.y, this.z, bounds.cx, bounds.cy, bounds.cz);
+  }
 
-    float rx = this.x - model.cx;
-    float ry = this.y - model.cy;
-    float rz = this.z - model.cz;
-    this.rc = (float) Math.sqrt(rx * rx + ry * ry + rz * rz);
+  /**
+   * Gets the normalized x position of this point relative to the given bounds. If the
+   * bounds has no x-dimension, the returned value is 0.5. The value is not necessarily
+   * constrained in the range 0-1 if this point lies out of the given bounds.
+   *
+   * @param bounds Normalization bounds
+   * @return Normalized x position of this point in the given bounds, 0-1 if contained
+   */
+  public float xn(LXNormalizationBounds bounds) {
+    return (bounds.xRange == 0) ? .5f : (this.x - bounds.xMin) / bounds.xRange;
+  }
+
+  /**
+   * Gets the normalized y position of this point relative to the given bounds. If the
+   * bounds has no y-dimension, the returned value is 0.5. The value is not necessarily
+   * constrained in the range 0-1 if this point lies out of the given bounds.
+   *
+   * @param bounds Normalization bounds
+   * @return Normalized y position of this point in the given bounds, 0-1 if contained
+   */
+  public float yn(LXNormalizationBounds bounds) {
+    return (bounds.yRange == 0) ? .5f : (this.y - bounds.yMin) / bounds.yRange;
+  }
+
+  /**
+   * Gets the normalized z position of this point relative to the given bounds. If the
+   * bounds has no z-dimension, the returned value is 0.5. The value is not necessarily
+   * constrained in the range 0-1 if this point lies out of the given bounds.
+   *
+   * @param bounds Normalization bounds
+   * @return Normalized z position of this point in the given bounds, 0-1 if contained
+   */
+  public float zn(LXNormalizationBounds bounds) {
+    return (bounds.zRange == 0) ? .5f : (this.z - bounds.zMin) / bounds.zRange;
   }
 }

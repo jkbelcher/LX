@@ -118,7 +118,7 @@ public abstract class LXClip extends LXRunnableComponent implements LXOscCompone
     addParameter("automationEnabled", this.automationEnabled);
     addParameter("customSnapshotTransition", this.customSnapshotTransition);
 
-    addChild("snapshot", this.snapshot = new LXClipSnapshot(lx));
+    addChild("snapshot", this.snapshot = new LXClipSnapshot(lx, this));
 
     for (LXEffect effect : bus.effects) {
       registerComponent(effect);
@@ -164,7 +164,7 @@ public abstract class LXClip extends LXRunnableComponent implements LXOscCompone
       this.bus.removeListener(this);
     }
     this.mutableLanes.clear();
-    this.snapshot.dispose();
+    LX.dispose(this.snapshot);
     this.listeners.clear();
     super.dispose();
   }

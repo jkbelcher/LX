@@ -30,11 +30,12 @@ import heronarts.lx.LX;
 import heronarts.lx.LXComponent;
 import heronarts.lx.LXDeviceComponent;
 import heronarts.lx.LXPath;
+import heronarts.lx.LXPresetComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.clip.LXClip;
-import heronarts.lx.clipboard.LXNormalizedValue;
 import heronarts.lx.color.ColorParameter;
 import heronarts.lx.color.LXDynamicColor;
+import heronarts.lx.color.LXPalette;
 import heronarts.lx.color.LXSwatch;
 import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXMidiEngine;
@@ -51,7 +52,6 @@ import heronarts.lx.modulation.LXParameterModulation;
 import heronarts.lx.modulation.LXTriggerModulation;
 import heronarts.lx.modulator.LXModulator;
 import heronarts.lx.parameter.BooleanParameter;
-import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXListenableNormalizedParameter;
 import heronarts.lx.parameter.LXNormalizedParameter;
@@ -287,9 +287,7 @@ public abstract class LXCommand {
 
       public Reset(LXParameter parameter) {
         this.parameter = new ParameterReference<LXParameter>(parameter);
-        this.originalValue = (parameter instanceof CompoundParameter)
-          ? ((CompoundParameter) parameter).getBaseValue()
-          : parameter.getValue();
+        this.originalValue = parameter.getBaseValue();
         this.originalString = (parameter instanceof StringParameter) ? ((StringParameter) parameter).getString() : null;
       }
 
@@ -319,7 +317,7 @@ public abstract class LXCommand {
 
       private final ParameterReference<DiscreteParameter> discreteParameter;
       private final int originalDiscreteValue;
-      private final int newDiscreteValue;
+      private int newDiscreteValue;
 
       private final ParameterReference<LXParameter> genericParameter;
       private final double originalGenericValue;
@@ -327,9 +325,8 @@ public abstract class LXCommand {
 
       public SetValue(DiscreteParameter parameter, int value) {
         this.isDiscrete = true;
-        this.discreteParameter = new ParameterReference<DiscreteParameter>(
-          parameter);
-        this.originalDiscreteValue = parameter.getValuei();
+        this.discreteParameter = new ParameterReference<DiscreteParameter>(parameter);
+        this.originalDiscreteValue = parameter.getBaseValuei();
         this.newDiscreteValue = value;
 
         this.genericParameter = null;
@@ -340,21 +337,16 @@ public abstract class LXCommand {
       public SetValue(LXParameter parameter, double value) {
         if (parameter instanceof DiscreteParameter) {
           this.isDiscrete = true;
-          this.discreteParameter = new ParameterReference<DiscreteParameter>(
-            (DiscreteParameter) parameter);
-          this.originalDiscreteValue = ((DiscreteParameter) parameter)
-            .getValuei();
+          this.discreteParameter = new ParameterReference<DiscreteParameter>((DiscreteParameter) parameter);
+          this.originalDiscreteValue = ((DiscreteParameter) parameter).getBaseValuei();
           this.newDiscreteValue = (int) value;
           this.genericParameter = null;
           this.originalGenericValue = 0;
           this.newGenericValue = 0;
         } else {
           this.isDiscrete = false;
-          this.genericParameter = new ParameterReference<LXParameter>(
-            parameter);
-          this.originalGenericValue = (parameter instanceof CompoundParameter)
-            ? ((CompoundParameter) parameter).getBaseValue()
-            : parameter.getValue();
+          this.genericParameter = new ParameterReference<LXParameter>(parameter);
+          this.originalGenericValue = parameter.getBaseValue();
           this.newGenericValue = value;
           this.discreteParameter = null;
           this.originalDiscreteValue = 0;
@@ -362,15 +354,22 @@ public abstract class LXCommand {
         }
       }
 
-      private LXParameter getParameter() {
+      public LXParameter getParameter() {
         return this.isDiscrete ? this.discreteParameter.get()
           : this.genericParameter.get();
       }
 
+      public SetValue updateDiscrete(int value) {
+        if (!this.isDiscrete) {
+          throw new IllegalStateException("Cannot update non-discrete parameter with integer value");
+        }
+        this.newDiscreteValue = value;
+        return this;
+      }
+
       public SetValue update(double value) {
         if (this.isDiscrete) {
-          throw new IllegalStateException(
-            "Cannot update discrete parameter with double value");
+          throw new IllegalStateException("Cannot update discrete parameter with double value");
         }
         this.newGenericValue = value;
         return this;
@@ -399,6 +398,12 @@ public abstract class LXCommand {
         }
       }
 
+    }
+
+    public static class SetIndex extends SetValue {
+      public SetIndex(DiscreteParameter parameter, int index) {
+        super(parameter, index + parameter.getMinValue());
+      }
     }
 
     public static class SetColor extends LXCommand {
@@ -468,7 +473,7 @@ public abstract class LXCommand {
 
       public Increment(DiscreteParameter parameter, int amount, boolean alwaysWrap) {
         this.parameter = new ParameterReference<DiscreteParameter>(parameter);
-        this.originalValue = parameter.getValuei();
+        this.originalValue = parameter.getBaseValuei();
         this.amount = amount;
         this.alwaysWrap = alwaysWrap;
       }
@@ -499,15 +504,25 @@ public abstract class LXCommand {
       private final ParameterReference<DiscreteParameter> parameter;
       private final int originalValue;
       private final int amount;
+      private final boolean alwaysWrap;
 
       public Decrement(DiscreteParameter parameter) {
-        this(parameter, 1);
+        this(parameter, 1, false);
       }
 
       public Decrement(DiscreteParameter parameter, int amount) {
+        this(parameter, amount, false);
+      }
+
+      public Decrement(DiscreteParameter parameter, boolean alwaysWrap) {
+        this(parameter, 1, alwaysWrap);
+      }
+
+      public Decrement(DiscreteParameter parameter, int amount, boolean alwaysWrap) {
         this.parameter = new ParameterReference<DiscreteParameter>(parameter);
-        this.originalValue = parameter.getValuei();
+        this.originalValue = parameter.getBaseValuei();
         this.amount = amount;
+        this.alwaysWrap = alwaysWrap;
       }
 
       @Override
@@ -517,7 +532,11 @@ public abstract class LXCommand {
 
       @Override
       public void perform(LX lx) {
-        this.parameter.get().decrement(this.amount);
+        if (this.alwaysWrap) {
+          this.parameter.get().decrement(this.amount, true);
+        } else {
+          this.parameter.get().decrement(this.amount);
+        }
       }
 
       @Override
@@ -557,11 +576,11 @@ public abstract class LXCommand {
     public static class SetNormalized extends LXCommand {
 
       private final ParameterReference<LXNormalizedParameter> parameter;
-      private final LXNormalizedValue originalValue;
+      private final double originalValue;
       private double newValue;
 
       public SetNormalized(LXNormalizedParameter parameter) {
-        this(parameter, new LXNormalizedValue(parameter).getValue());
+        this(parameter, parameter.getBaseNormalized());
       }
 
       public SetNormalized(BooleanParameter parameter, boolean value) {
@@ -570,8 +589,12 @@ public abstract class LXCommand {
 
       public SetNormalized(LXNormalizedParameter parameter, double newValue) {
         this.parameter = new ParameterReference<LXNormalizedParameter>(parameter);
-        this.originalValue = new LXNormalizedValue(parameter);
+        this.originalValue = parameter.getBaseNormalized();
         this.newValue = newValue;
+      }
+
+      public LXNormalizedParameter getParameter() {
+        return this.parameter.get();
       }
 
       @Override
@@ -581,7 +604,7 @@ public abstract class LXCommand {
 
       @Override
       public void undo(LX lx) {
-        this.parameter.get().setNormalized(this.originalValue.getValue());
+        this.parameter.get().setNormalized(this.originalValue);
       }
 
       @Override
@@ -965,12 +988,15 @@ public abstract class LXCommand {
 
     public static class LoadPreset extends LXCommand {
 
-      private final ComponentReference<LXDeviceComponent> device;
+      private final ComponentReference<LXComponent> device;
       private final JsonObject deviceObj;
       private final File file;
 
-      public LoadPreset(LXDeviceComponent device, File file) {
-        this.device = new ComponentReference<LXDeviceComponent>(device);
+      public LoadPreset(LXComponent device, File file) {
+        if (!(device instanceof LXPresetComponent)) {
+          throw new IllegalArgumentException("Cannot load a preset for a non-preset device: " + device.getClass().getName());
+        }
+        this.device = new ComponentReference<LXComponent>(device);
         this.deviceObj = LXSerializable.Utils.toObject(device);
         this.file = file;
       }
@@ -1390,9 +1416,8 @@ public abstract class LXCommand {
       private ComponentReference<LXGroup> group;
 
       public GroupSelectedChannels(LX lx) {
-        List<LXChannel> channels = lx.engine.mixer.getSelectedChannelsForGroup();
-        for (LXChannel channel : channels) {
-          groupChannels.add(new ComponentReference<LXChannel>(channel));
+        for (LXChannel channel : lx.engine.mixer.getSelectedChannelsForGroup()) {
+          this.groupChannels.add(new ComponentReference<LXChannel>(channel));
         }
       }
 
@@ -1403,16 +1428,26 @@ public abstract class LXCommand {
 
       @Override
       public void perform(LX lx) {
-        List<LXChannel> channels = new ArrayList<LXChannel>(this.groupChannels.size());
-        for (ComponentReference<LXChannel> channel : this.groupChannels) {
-          channels.add(channel.get());
+        if (!isIgnored()) {
+
+          final List<LXChannel> channels = new ArrayList<LXChannel>(this.groupChannels.size());
+          for (ComponentReference<LXChannel> channel : this.groupChannels) {
+            channels.add(channel.get());
+          }
+          this.group = new ComponentReference<LXGroup>(lx.engine.mixer.addGroup(channels));
         }
-        this.group = new ComponentReference<LXGroup>(lx.engine.mixer.addGroup(channels));
       }
 
       @Override
       public void undo(LX lx) {
-        this.group.get().ungroup();
+        if (this.group != null) {
+          this.group.get().ungroup();
+        }
+      }
+
+      @Override
+      public boolean isIgnored() {
+        return this.groupChannels.isEmpty();
       }
 
     }
@@ -1588,16 +1623,18 @@ public abstract class LXCommand {
       private final ComponentReference<LXModulationEngine> engine;
 
       private final ModulationSourceReference source;
-      private final ParameterReference<CompoundParameter> target;
+      private final ParameterReference<LXCompoundModulation.Target> target;
 
       private ComponentReference<LXCompoundModulation> modulation;
 
-      public AddModulation(LXModulationEngine engine,
-        LXNormalizedParameter source, CompoundParameter target) {
+      private JsonObject modulationObj = null;
+
+      public AddModulation(LXModulationEngine engine, LXNormalizedParameter source, LXCompoundModulation.Target target) {
         this.engine = new ComponentReference<LXModulationEngine>(engine);
         this.source = new ModulationSourceReference(source);
-        this.target = new ParameterReference<CompoundParameter>(target);
+        this.target = new ParameterReference<LXCompoundModulation.Target>(target);
       }
+
 
       @Override
       public String getDescription() {
@@ -1607,11 +1644,19 @@ public abstract class LXCommand {
       @Override
       public void perform(LX lx) throws InvalidCommandException {
         try {
+          LXCompoundModulation.Target target = this.target.get();
           LXCompoundModulation modulation = new LXCompoundModulation(
-            this.engine.get(),  this.source.get(), this.target.get());
+            this.engine.get(),
+            this.source.get(),
+            target
+          );
+          if (this.modulationObj != null) {
+            modulation.load(lx, this.modulationObj);
+          } else {
+            this.modulationObj = LXSerializable.Utils.toObject(lx, modulation);
+          }
           this.engine.get().addModulation(modulation);
-          this.modulation = new ComponentReference<LXCompoundModulation>(
-            modulation);
+          this.modulation = new ComponentReference<LXCompoundModulation>(modulation);
         } catch (LXParameterModulation.ModulationException mx) {
           throw new InvalidCommandException(mx);
         }
@@ -1663,8 +1708,8 @@ public abstract class LXCommand {
 
       private final List<RemoveModulation> removeModulations = new ArrayList<RemoveModulation>();
 
-      public RemoveModulations(CompoundParameter parameter) {
-        for (LXCompoundModulation modulation : parameter.modulations) {
+      public RemoveModulations(LXCompoundModulation.Target parameter) {
+        for (LXCompoundModulation modulation : parameter.getModulations()) {
           this.removeModulations.add(new RemoveModulation(modulation.scope, modulation));
         }
       }
@@ -1996,6 +2041,60 @@ public abstract class LXCommand {
         return !this.set;
       }
 
+    }
+
+    public static class ImportSwatches extends LXCommand {
+
+      private static class ImportedSwatch {
+        private final ComponentReference<LXSwatch> swatch;
+        private final JsonObject swatchObj;
+
+        private ImportedSwatch(LXSwatch swatch) {
+          this.swatch = new ComponentReference<LXSwatch>(swatch);
+          this.swatchObj = LXSerializable.Utils.toObject(swatch.getLX(), swatch);
+        }
+      }
+
+      private final File file;
+      private List<ImportedSwatch> importedSwatches;
+
+      public ImportSwatches(LXPalette palette, File file) {
+        this.file = file;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Import Swatches " + this.file.getName();
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        if (this.importedSwatches == null) {
+          this.importedSwatches= new ArrayList<ImportedSwatch>();
+          final List<LXSwatch> imported = lx.engine.palette.importSwatches(this.file);
+          if (imported != null) {
+            for (LXSwatch swatch : imported) {
+              this.importedSwatches.add(new ImportedSwatch(swatch));
+            }
+          }
+        } else {
+          // We've imported already, this is a redo and we need to
+          // preserve the swatch IDs and restore whatever was on disk
+          // the first time... the file may have changed underneath us
+          // but there could be "Redo" operations ahead of us in the
+          // queue
+          for (ImportedSwatch swatch : this.importedSwatches) {
+            lx.engine.palette.addSwatch(swatch.swatchObj, -1);
+          }
+        }
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        for (int i = this.importedSwatches.size() - 1; i >= 0; --i) {
+          lx.engine.palette.removeSwatch(this.importedSwatches.get(i).swatch.get());
+        }
+      }
     }
   }
 
@@ -2516,7 +2615,6 @@ public abstract class LXCommand {
       @Override
       public void perform(LX lx) throws InvalidCommandException {
         lx.structure.views.removeView(this.view.get());
-
       }
 
       @Override
@@ -2554,7 +2652,60 @@ public abstract class LXCommand {
       public void undo(LX lx) {
         lx.structure.views.moveView(this.view.get(), this.fromIndex);
       }
+    }
 
+    public static class ImportViews extends LXCommand {
+
+      private static class ImportedView {
+        private final ComponentReference<LXViewDefinition> view;
+        private final JsonObject viewObj;
+
+        private ImportedView(LXViewDefinition view) {
+          this.view = new ComponentReference<LXViewDefinition>(view);
+          this.viewObj = LXSerializable.Utils.toObject(view.getLX(), view);
+        }
+      }
+
+      private final File file;
+      private List<ImportedView> importedViews;
+
+      public ImportViews(File file) {
+        this.file = file;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Import Views " + this.file.getName();
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        if (this.importedViews == null) {
+          this.importedViews = new ArrayList<ImportedView>();
+          final List<LXViewDefinition> imported = lx.structure.importViews(this.file);
+          if (imported != null) {
+            for (LXViewDefinition view : imported) {
+              this.importedViews.add(new ImportedView(view));
+            }
+          }
+        } else {
+          // We've imported already, this is a redo and we need to
+          // preserve the view IDs and restore whatever was on disk
+          // the first time... the file may have changed underneath us
+          // but there could be "Redo" operations ahead of us in the
+          // queue
+          for (ImportedView view : this.importedViews) {
+            lx.structure.views.addView(view.viewObj, -1);
+          }
+        }
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        for (int i = this.importedViews.size() - 1; i >= 0; --i) {
+          lx.structure.views.removeView(this.importedViews.get(i).view.get());
+        }
+      }
     }
   }
 
@@ -2715,12 +2866,12 @@ public abstract class LXCommand {
     public static class AddMapping extends LXCommand {
 
       private final LXShortMessage message;
-      private final ParameterReference<LXParameter> parameter;
+      private final ParameterReference<LXNormalizedParameter> parameter;
       private LXMidiMapping mapping;
 
-      public AddMapping(LXShortMessage message, LXParameter parameter) {
+      public AddMapping(LXShortMessage message, LXNormalizedParameter parameter) {
         this.message = message;
-        this.parameter = new ParameterReference<LXParameter>(parameter);
+        this.parameter = new ParameterReference<LXNormalizedParameter>(parameter);
       }
 
       @Override

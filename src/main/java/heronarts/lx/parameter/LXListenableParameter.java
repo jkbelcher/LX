@@ -104,7 +104,7 @@ public abstract class LXListenableParameter implements LXParameter {
   }
 
   public LXListenableParameter addListener(LXParameterListener listener, boolean fireImmediately) {
-    Objects.requireNonNull(listener, "May add null LXParameterListener: " + this);
+    Objects.requireNonNull(listener, "May not add null LXParameterListener: " + this);
     if (this.listeners.contains(listener)) {
       throw new IllegalStateException("Cannot add duplicate LXParameterListener " + getCanonicalPath() + " " + listener.getClass().getName());
     }
@@ -234,10 +234,6 @@ public abstract class LXListenableParameter implements LXParameter {
 
   public double getValue() {
     return this.value;
-  }
-
-  public final float getValuef() {
-    return (float) getValue();
   }
 
   public final boolean isDefault() {

@@ -316,7 +316,7 @@ public class DJM900nxs2 extends LXMidiSurface {
 
   public final EnumParameter<XFMode> xfMode =
     new EnumParameter<XFMode>("Crossfader Sync", XFMode.OFF)
-    .setDescription("Mode for following DJM900nxs2 crossfader with LX");
+    .setDescription("Mode for following DJM-900nxs2 crossfader with LX");
 
   public DJM900nxs2(LX lx, LXMidiInput input, LXMidiOutput output) {
     super(lx, input, output);
@@ -329,6 +329,7 @@ public class DJM900nxs2 extends LXMidiSurface {
     this.colorSensitivity.addListener(colorSensitivityListener);
     this.eqRangeMax.addListener(this.eqRangeMaxListener);
     this.smartXF.addListener(this.smartXFListener);
+    this.xfMode.addListener(this.xfModeListener);
   }
 
   @Override
@@ -377,6 +378,15 @@ public class DJM900nxs2 extends LXMidiSurface {
 
   private final LXParameterListener smartXFListener = (p) -> {
     if (this.xfMode.getEnum() == XFMode.SMART) {
+      this.lx.engine.mixer.crossfader.setNormalized(this.smartXF.getNormalized());
+    }
+  };
+
+  private final LXParameterListener xfModeListener = (p) -> {
+    XFMode mode = this.xfMode.getEnum();
+    if (mode == XFMode.DIRECT) {
+      this.lx.engine.mixer.crossfader.setNormalized(this.crossfader.getNormalized());
+    } else if (mode == XFMode.SMART) {
       this.lx.engine.mixer.crossfader.setNormalized(this.smartXF.getNormalized());
     }
   };
@@ -681,6 +691,7 @@ public class DJM900nxs2 extends LXMidiSurface {
     this.colorSensitivity.removeListener(colorSensitivityListener);
     this.eqRangeMax.removeListener(this.eqRangeMaxListener);
     this.smartXF.removeListener(smartXFListener);
+    this.xfMode.removeListener(xfModeListener);
     super.dispose();
   }
 }

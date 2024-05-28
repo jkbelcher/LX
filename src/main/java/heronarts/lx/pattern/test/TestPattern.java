@@ -21,8 +21,10 @@ package heronarts.lx.pattern.test;
 import heronarts.lx.LXCategory;
 import heronarts.lx.color.LXColor;
 import heronarts.lx.model.LXModel;
+import heronarts.lx.model.LXPoint;
 import heronarts.lx.LX;
 import heronarts.lx.modulator.Click;
+import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
@@ -60,18 +62,27 @@ public class TestPattern extends LXPattern {
     new EnumParameter<Mode>("Mode", Mode.ITERATE)
     .setDescription("Which mode of test operation to use");
 
-  public final CompoundParameter rate = (CompoundParameter)
+  public final CompoundParameter rate =
     new CompoundParameter("Rate", 50, 10, 10000)
     .setExponent(2)
     .setUnits(LXParameter.Units.MILLISECONDS)
     .setDescription("Iteration speed through points in the model");
 
-  public final DiscreteParameter fixedIndex = new DiscreteParameter("Fixed", 0, LXUtils.max(1, model.size))
-  .setDescription("Fixed LED point to turn on");
+  public final DiscreteParameter fixedIndex =
+    new DiscreteParameter("Fixed", 0, LXUtils.max(1, model.size))
+    .setDescription("Fixed LED point to turn on");
 
   public final StringParameter tag =
     new StringParameter("Tag", LXModel.Tag.STRIP)
     .setDescription("Sets the fixture tag to query for");
+
+  public final BooleanParameter tagAll =
+    new BooleanParameter("All", true)
+    .setDescription("Light up all points in the tag");
+
+  public final DiscreteParameter tagIndex =
+    new DiscreteParameter("Fixed", 0, LXUtils.max(1, model.size))
+    .setDescription("Fixed LED point to turn on");
 
   public final BoundedParameter cpuTest =
     new BoundedParameter("CPU Test", 0, 1000)
@@ -87,18 +98,45 @@ public class TestPattern extends LXPattern {
     addParameter("rate", this.rate);
     addParameter("fixedIndex", this.fixedIndex);
     addParameter("tag", this.tag);
+    addParameter("tagAll", this.tagAll);
+    addParameter("tagIndex", this.tagIndex);
     addParameter("cpuTest", this.cpuTest);
     startModulator(this.increment);
     setAutoCycleEligible(false);
   }
 
   @Override
+  public void onParameterChanged(LXParameter p) {
+    super.onParameterChanged(p);
+    if (p == this.tag) {
+      updateTagIndex();
+    }
+  }
+
+  @Override
   protected void onModelChanged(LXModel model) {
     this.fixedIndex.setRange(0, LXUtils.max(1, model.size));
+    updateTagIndex();
+  }
+
+  private void updateTagIndex() {
+    int count = 0;
+    for (LXModel sub : model.sub(this.tag.getString())) {
+      count += sub.points.length;
+    }
+    this.tagIndex.setRange(0, LXUtils.max(1, count));
   }
 
   @Override
   public void run(double deltaMs) {
+    final int cpuTest = 1000 * (int) (this.cpuTest.getValue());
+    for (int i = 0; i < cpuTest; ++i) {
+      double d1 = Math.random();
+      double d2 = Math.random();
+      double d3 = Math.random();
+      LXUtils.lerp(d1, d2, d3);
+    }
+
     if (model.size == 0) {
       return;
     }
@@ -110,24 +148,30 @@ public class TestPattern extends LXPattern {
         ++this.active;
       }
       this.active = this.active % model.points.length;
-      this.colors[this.active] = LXColor.WHITE;
+      this.colors[model.points[this.active].index] = LXColor.WHITE;
       break;
     case FIXED:
-      this.colors[this.fixedIndex.getValuei()] = LXColor.WHITE;
+      this.colors[model.points[this.fixedIndex.getValuei()].index] = LXColor.WHITE;
       break;
     case TAG:
+      final boolean tagAll = this.tagAll.isOn();
+      final int tagIndex = this.tagIndex.getValuei();
+      int i = 0;
       for (LXModel sub : model.sub(this.tag.getString())) {
-        setColor(sub, LXColor.WHITE);
+        if (tagAll) {
+          setColor(sub, LXColor.WHITE);
+        } else {
+          for (LXPoint p : sub.points) {
+            if (i++ == tagIndex) {
+              colors[p.index] = LXColor.WHITE;
+              return;
+            }
+          }
+        }
       }
       break;
     }
 
-    final int cpuTest = 1000 * (int) (this.cpuTest.getValue());
-    for (int i = 0; i < cpuTest; ++i) {
-      double d1 = Math.random();
-      double d2 = Math.random();
-      double d3 = Math.random();
-      LXUtils.lerp(d1, d2, d3);
-    }
+
   }
 }

@@ -132,7 +132,7 @@ public class GateEffect extends LXEffect implements LXEffect.Midi {
 
   public final EnumParameter<TriggerMode> triggerMode =
     new EnumParameter<TriggerMode>("Trigger Mode", TriggerMode.RETRIG)
-    .setDescription("Trigger Mode");
+    .setDescription("How to retrigger the envelope on overlapping events");
 
   public final BooleanParameter manualTrigger =
     new BooleanParameter("Trigger", false)
@@ -202,7 +202,6 @@ public class GateEffect extends LXEffect implements LXEffect.Midi {
     onParameterChanged(this.envelopeMode);
     onParameterChanged(this.triggerMode);
 
-    this.midiFilter.enabled.addListener(this);
   }
 
   private float amount = 1;
@@ -237,9 +236,8 @@ public class GateEffect extends LXEffect implements LXEffect.Midi {
       setColors(LXColor.BLACK);
     } else if (level < 100) {
       int mask = LXColor.gray(level);
-      int alpha = 0x100;
       for (LXPoint p : model.points) {
-        colors[p.index] = LXColor.multiply(colors[p.index], mask, alpha);
+        colors[p.index] = LXColor.multiply(colors[p.index], mask, LXColor.BLEND_ALPHA_FULL);
       }
     }
   }
@@ -298,9 +296,11 @@ public class GateEffect extends LXEffect implements LXEffect.Midi {
   }
 
   @Override
-  public void dispose() {
-    this.midiFilter.enabled.removeListener(this);
-    super.dispose();
+  public void midiPanicReceived() {
+    if (this.midiLegatoCount > 0) {
+      this.midiLegatoCount = 0;
+      this.env.engage.setValue(false);
+    }
   }
 
 }

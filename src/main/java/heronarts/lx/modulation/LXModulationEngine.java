@@ -34,6 +34,7 @@ import heronarts.lx.LXModulatorComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.midi.LXMidiListener;
 import heronarts.lx.midi.LXShortMessage;
+import heronarts.lx.midi.MidiPanic;
 import heronarts.lx.modulator.LXModulator;
 import heronarts.lx.osc.LXOscComponent;
 import heronarts.lx.osc.OscMessage;
@@ -143,7 +144,7 @@ public class LXModulationEngine extends LXModulatorComponent implements LXOscCom
       listener.modulationRemoved(this, modulation);
     }
     _reindex(this.modulations);
-    modulation.dispose();
+    LX.dispose(modulation);
     return this;
   }
 
@@ -168,7 +169,7 @@ public class LXModulationEngine extends LXModulatorComponent implements LXOscCom
     for (Listener listener : this.listeners) {
       listener.triggerRemoved(this, trigger);
     }
-    trigger.dispose();
+    LX.dispose(trigger);
     return this;
   }
 
@@ -294,8 +295,14 @@ public class LXModulationEngine extends LXModulatorComponent implements LXOscCom
    */
   public void midiDispatch(LXShortMessage message) {
     for (LXModulator modulator : this.modulators) {
-      if ((modulator instanceof LXMidiListener) && modulator.running.isOn() && modulator.midiFilter.filter(message)) {
-        message.dispatch((LXMidiListener) modulator);
+      if (modulator instanceof LXMidiListener) {
+        LXMidiListener listener = (LXMidiListener) modulator;
+        if (message instanceof MidiPanic) {
+          modulator.midiFilter.midiPanic();
+          message.dispatch(listener);
+        } else if (modulator.running.isOn() && modulator.midiFilter.filter(message)) {
+          message.dispatch(listener);
+        }
       }
     }
   }

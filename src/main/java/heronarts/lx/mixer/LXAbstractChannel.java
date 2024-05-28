@@ -33,6 +33,7 @@ import heronarts.lx.blend.LXBlend;
 import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.midi.MidiFilterParameter;
+import heronarts.lx.midi.MidiPanic;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.EnumParameter;
@@ -221,10 +222,18 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
     return this;
   }
 
+  public boolean isPlaylist() {
+    return false;
+  }
+
+  public boolean isComposite() {
+    return false;
+  }
+
   void updateChannelBlendOptions() {
     for (LXBlend blend : this.blendMode.getObjects()) {
       if (blend != null) {
-        blend.dispose();
+        LX.dispose(blend);
       }
     }
     this.blendMode.setObjects(lx.engine.mixer.instantiateChannelBlends());
@@ -291,7 +300,7 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
    */
   public void midiDispatch(LXShortMessage message) {
     for (LXEffect effect : this.effects) {
-      if (effect.enabled.isOn()) {
+      if ((message instanceof MidiPanic) || effect.enabled.isOn()) {
         effect.midiDispatch(message);
       }
     }
@@ -368,6 +377,15 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
     this.blendBuffer.dispose();
     this.midiListeners.clear();
     this.listeners.clear();
+  }
+
+  @Override
+  public void postProcessPreset(LX lx, JsonObject obj) {
+    super.postProcessPreset(lx, obj);
+    LXSerializable.Utils.stripParameter(obj, this.enabled);
+    LXSerializable.Utils.stripParameter(obj, this.crossfadeGroup);
+    LXSerializable.Utils.stripParameter(obj, this.cueActive);
+    LXSerializable.Utils.stripParameter(obj, this.auxActive);
   }
 
   private void loadLegacyView(LX lx, JsonObject obj) {

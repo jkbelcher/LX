@@ -43,6 +43,10 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
 
   private final File file;
 
+  public final BooleanParameter eulaAccepted =
+    new BooleanParameter("EULA Accepted", false)
+    .setDescription("Whether the EULA has been accepted");
+
   public final BooleanParameter focusChannelOnCue =
     new BooleanParameter("Focus On Cue", false)
     .setDescription("Whether a channel should be automatically focused when its cue is set to active");
@@ -61,9 +65,9 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     .setUnits(LXParameter.Units.PERCENT)
     .setMappable(false);
 
-  public final BooleanParameter showHelpBar =
-    new BooleanParameter("Help Bar", true)
-    .setDescription("Whether to show a bottom bar on the UI with helpful tips");
+  public final BooleanParameter showHelpMessages =
+    new BooleanParameter("Help Messages", true)
+    .setDescription("Whether to show contextual help messages in the status bar");
 
   public final BooleanParameter schedulerEnabled =
     new BooleanParameter("Project Scheduler Enabed", false)
@@ -90,12 +94,13 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   protected LXPreferences(LX lx) {
     this.lx = lx;
     this.file = lx.getMediaFile(PREFERENCES_FILE_NAME);
+    this.eulaAccepted.addListener(this);
     this.focusChannelOnCue.addListener(this);
     this.focusActivePattern.addListener(this);
     this.sendCueToOutput.addListener(this);
     this.uiZoom.addListener(this);
     this.uiTheme.addListener(this);
-    this.showHelpBar.addListener(this);
+    this.showHelpMessages.addListener(this);
     this.schedulerEnabled.addListener(this);
     this.showCpuLoad.addListener(this);
 
@@ -171,6 +176,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   }
 
   private static final String KEY_VERSION = "version";
+  private static final String KEY_EULA_ACCEPTED = "eulaAccepted";
   private static final String KEY_PROJECT_FILE_NAME = "projectFileName";
   private static final String KEY_SCHEDULE_FILE_NAME = "scheduleFileName";
   private static final String KEY_WINDOW_WIDTH = "windowWidth";
@@ -183,7 +189,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   private static final String KEY_FOCUS_CHANNEL_ON_CUE = "focusChannelOnCue";
   private static final String KEY_FOCUS_ACTIVE_PATTERN = "focusActivePattern";
   private static final String KEY_SEND_CUE_TO_OUTPUT = "sendCueToOutput";
-  private static final String KEY_SHOW_HELP_BAR = "showHelpBar";
+  private static final String KEY_SHOW_HELP_MESSAGES = "showHelpMessages";
   private static final String KEY_SCHEDULER_ENABLED = "schedulerEnabled";
   private static final String KEY_SHOW_CPU_LOAD = "showCpuLoad";
   private static final String KEY_REGISTRY = "registry";
@@ -198,6 +204,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     if (this.scheduleFileName != null) {
       object.addProperty(KEY_SCHEDULE_FILE_NAME, this.scheduleFileName);
     }
+    object.addProperty(KEY_EULA_ACCEPTED, this.eulaAccepted.isOn());
     object.addProperty(KEY_WINDOW_WIDTH, this.windowWidth);
     object.addProperty(KEY_WINDOW_HEIGHT, this.windowHeight);
     object.addProperty(KEY_WINDOW_POS_X, this.windowPosX);
@@ -207,7 +214,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     object.addProperty(KEY_FOCUS_CHANNEL_ON_CUE, this.focusChannelOnCue.isOn());
     object.addProperty(KEY_FOCUS_ACTIVE_PATTERN, this.focusActivePattern.isOn());
     object.addProperty(KEY_SEND_CUE_TO_OUTPUT, this.sendCueToOutput.isOn());
-    object.addProperty(KEY_SHOW_HELP_BAR, this.showHelpBar.isOn());
+    object.addProperty(KEY_SHOW_HELP_MESSAGES, this.showHelpMessages.isOn());
     object.addProperty(KEY_SCHEDULER_ENABLED, this.schedulerEnabled.isOn());
     object.addProperty(KEY_SHOW_CPU_LOAD, this.showCpuLoad.isOn());
 
@@ -216,10 +223,11 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
 
   @Override
   public void load(LX lx, JsonObject object) {
+    LXSerializable.Utils.loadBoolean(this.eulaAccepted, object, KEY_EULA_ACCEPTED);
     LXSerializable.Utils.loadBoolean(this.focusChannelOnCue, object, KEY_FOCUS_CHANNEL_ON_CUE);
     LXSerializable.Utils.loadBoolean(this.focusActivePattern, object, KEY_FOCUS_ACTIVE_PATTERN);
     LXSerializable.Utils.loadBoolean(this.sendCueToOutput, object, KEY_SEND_CUE_TO_OUTPUT);
-    LXSerializable.Utils.loadBoolean(this.showHelpBar, object, KEY_SHOW_HELP_BAR);
+    LXSerializable.Utils.loadBoolean(this.showHelpMessages, object, KEY_SHOW_HELP_MESSAGES);
     LXSerializable.Utils.loadBoolean(this.schedulerEnabled, object, KEY_SCHEDULER_ENABLED);
     LXSerializable.Utils.loadBoolean(this.showCpuLoad, object, KEY_SHOW_CPU_LOAD);
     LXSerializable.Utils.loadInt(this.uiZoom, object, KEY_UI_ZOOM);
@@ -265,6 +273,18 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     } catch (IOException iox) {
       LX.error(iox, "Exception writing the preferences file: " + this.file);
     }
+  }
+
+  public void loadEULA() {
+    this.inLoad = true;
+    if (this.file.exists()) {
+      try (FileReader fr = new FileReader(this.file)) {
+        LXSerializable.Utils.loadBoolean(this.eulaAccepted, new Gson().fromJson(fr, JsonObject.class), KEY_EULA_ACCEPTED);
+      } catch (Exception x) {
+        LX.error(x, "Exception loading EULA state file: " + this.file);
+      }
+    }
+    this.inLoad = false;
   }
 
   public void load() {

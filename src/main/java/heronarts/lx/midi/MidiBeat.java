@@ -24,25 +24,39 @@ import javax.sound.midi.SysexMessage;
 public class MidiBeat extends LXShortMessage {
 
   public static final long PERIOD_UNKNOWN = -1;
+  public static final int STOP = -1;
 
   private final int beat;
-  private double period = PERIOD_UNKNOWN;
 
-  MidiBeat(ShortMessage message, int beat) {
+  private double periodMs = PERIOD_UNKNOWN;
+
+  public final long nanoTime;
+
+  MidiBeat(ShortMessage message, int beat, long nanoTime) {
     super(message, SysexMessage.SYSTEM_EXCLUSIVE);
     this.beat = beat;
+    this.nanoTime = nanoTime;
   }
 
   void setPeriod(double period) {
-    this.period = period;
+    this.periodMs = period;
   }
 
+  /**
+   * Get the beat period in milliseconds
+   *
+   * @return Milliseconds per beat
+   */
   public double getPeriod() {
-    return this.period;
+    return this.periodMs;
   }
 
   public int getBeat() {
     return this.beat;
+  }
+
+  public boolean isStop() {
+    return this.beat == STOP;
   }
 
 }

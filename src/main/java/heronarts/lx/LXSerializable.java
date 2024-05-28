@@ -30,7 +30,6 @@ import com.google.gson.JsonObject;
 import heronarts.lx.color.ColorParameter;
 import heronarts.lx.parameter.AggregateParameter;
 import heronarts.lx.parameter.BooleanParameter;
-import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.FunctionalParameter;
 import heronarts.lx.parameter.LXParameter;
@@ -63,7 +62,27 @@ public interface LXSerializable {
    */
   public static class Utils {
 
-    public static void saveParameters(JsonObject obj, Map<String, LXParameter> parameters) {
+    public static boolean hasParameter(JsonObject object, String parameter) {
+      if (object.has(LXComponent.KEY_PARAMETERS)) {
+        return object.get(LXComponent.KEY_PARAMETERS).getAsJsonObject().has(parameter);
+      }
+      return false;
+    }
+
+    public static JsonElement getParameter(JsonObject object, String parameter) {
+      if (object.has(LXComponent.KEY_PARAMETERS)) {
+        return object.get(LXComponent.KEY_PARAMETERS).getAsJsonObject().get(parameter);
+      }
+      return null;
+    }
+
+    public static JsonObject saveParameters(LXParameter.Collection parameters) {
+      final JsonObject obj = new JsonObject();
+      saveParameters(obj, parameters);
+      return obj;
+    }
+
+    public static void saveParameters(JsonObject obj, LXParameter.Collection parameters) {
       for (String path : parameters.keySet()) {
         LXParameter parameter = parameters.get(path);
         if (parameter instanceof AggregateParameter) {
@@ -84,15 +103,30 @@ public interface LXSerializable {
       } else if (parameter instanceof BooleanParameter) {
         obj.addProperty(path, ((BooleanParameter) parameter).isOn());
       } else if (parameter instanceof DiscreteParameter) {
-        obj.addProperty(path, ((DiscreteParameter) parameter).getValuei());
+        obj.addProperty(path, ((DiscreteParameter) parameter).getBaseValuei());
       } else if (parameter instanceof ColorParameter) {
-        obj.addProperty(path, ((ColorParameter) parameter).getColor());
-      } else if (parameter instanceof CompoundParameter) {
-        obj.addProperty(path, ((CompoundParameter) parameter).getBaseValue());
+        obj.addProperty(path, ((ColorParameter) parameter).getBaseColor());
       } else if (parameter instanceof FunctionalParameter) {
         // Do not write FunctionalParamters into saved files
       } else {
-        obj.addProperty(path, parameter.getValue());
+        obj.addProperty(path, parameter.getBaseValue());
+      }
+    }
+
+    /**
+     * Utility function to load a set of parameters
+     *
+     * @param obj JsonObject to serialize to
+     * @param parameters Map of parameters to unserialize
+     */
+    public static void loadParameters(JsonObject obj, LXParameter.Collection parameters) {
+      for (String path : parameters.keySet()) {
+        final LXParameter parameter = parameters.get(path);
+        if (parameter instanceof AggregateParameter) {
+          // Let this store/restore from the underlying parameter values
+          continue;
+        }
+        LXSerializable.Utils.loadParameter(parameter, obj, path);
       }
     }
 
@@ -100,7 +134,9 @@ public interface LXSerializable {
       if (obj.has(path)) {
         JsonElement value = obj.get(path);
         try {
-          if (parameter instanceof StringParameter) {
+          if (parameter instanceof FunctionalParameter) {
+            // Do nothing
+          } else if (parameter instanceof StringParameter) {
             if (value instanceof JsonNull) {
               ((StringParameter) parameter).setValue(null);
             } else {
@@ -112,10 +148,6 @@ public interface LXSerializable {
             parameter.setValue(value.getAsInt());
           } else if (parameter instanceof ColorParameter) {
             ((ColorParameter) parameter).setColor(value.getAsInt());
-          } else if (parameter instanceof CompoundParameter) {
-            parameter.setValue(value.getAsDouble());
-          } else if (parameter instanceof FunctionalParameter) {
-            // Do nothing
           } else {
             parameter.setValue(value.getAsDouble());
           }
@@ -400,6 +432,10 @@ public interface LXSerializable {
         }
       }
       return object;
+    }
+
+    public static JsonObject stripParameter(JsonObject object, LXParameter parameter) {
+      return stripParameter(object, parameter.getPath());
     }
 
     public static JsonObject stripParameter(JsonObject object, String parameter) {

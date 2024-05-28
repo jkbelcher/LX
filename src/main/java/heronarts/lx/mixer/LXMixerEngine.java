@@ -131,6 +131,10 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new BooleanParameter("Condensed", false)
     .setDescription("Whether the mixer view should be condensed");
 
+  public final BooleanParameter viewStacked =
+    new BooleanParameter("Stacked", false)
+    .setDescription("Whether the mixer view is stacked on the device bin");
+
   public LXMixerEngine(LX lx) {
     super(lx, "Mixer");
 
@@ -203,6 +207,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     addParameter("auxA", this.auxA);
     addParameter("auxB", this.auxB);
     addParameter("viewCondensed", this.viewCondensed);
+    addParameter("viewStacked", this.viewStacked);
   }
 
   @Override
@@ -313,7 +318,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
   private void updateCrossfaderBlendOptions() {
     for (LXBlend blend : this.crossfaderBlendMode.getObjects()) {
       if (blend != null) {
-        blend.dispose();
+        LX.dispose(blend);
       }
     }
     this.crossfaderBlendMode.setObjects(instantiateCrossfaderBlends());
@@ -710,7 +715,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
       getFocusedChannel().selected.setValue(true);
     }
 
-    channel.dispose();
+    LX.dispose(channel);
   }
 
   /**
@@ -1037,8 +1042,8 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     }
 
     // Step 3: blend the channel buffers down
-    boolean blendLeft = leftBusActive || this.cueA.isOn();
-    boolean blendRight = rightBusActive || this.cueB.isOn();
+    boolean blendLeft = leftBusActive || this.cueA.isOn() || (isPerformanceMode && this.auxA.isOn());
+    boolean blendRight = rightBusActive || this.cueB.isOn() || (isPerformanceMode && this.auxB.isOn());
     boolean leftExists = false, rightExists = false;
     for (LXAbstractChannel channel : this.channels) {
       long blendStart = System.nanoTime();
@@ -1151,7 +1156,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         final int mult = LXColor.gray(100. * fader);
         final int[] output = this.blendStackMain.output;
         for (int i = 0; i < output.length; ++i) {
-          output[i] = LXColor.multiply(output[i], mult, 0x100);
+          output[i] = LXColor.multiply(output[i], mult, LXColor.BLEND_ALPHA_FULL);
         }
       }
     }
@@ -1171,6 +1176,10 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
   @Override
   public void load(LX lx, JsonObject obj) {
+    if (obj.has(KEY_RESET)) {
+      this.parameters.reset();
+    }
+
     // Add the new channels
     if (obj.has(KEY_CHANNELS)) {
       JsonArray channelsArray = obj.getAsJsonArray(KEY_CHANNELS);
@@ -1200,7 +1209,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     for (LXAbstractChannel channel : toRemove) {
       removeChannel(channel);
     }
-    this.masterBus.dispose();
+    LX.dispose(this.masterBus);
     super.dispose();
   }
 

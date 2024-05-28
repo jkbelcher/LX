@@ -113,6 +113,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     new BooleanParameter("Performance", false)
     .setDescription("Whether performance mode UI is enabled");
 
+  public final BooleanParameter restricted =
+    new BooleanParameter("Restricted", false)
+    .setDescription("Whether rendering is disabled due to license restrictions");
+
   public final LXModulationEngine modulation;
 
   public final LXSnapshotEngine snapshots;
@@ -126,7 +130,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     public final BooleanParameter restricted =
       new BooleanParameter("Restricted", false)
-      .setDescription("Whether output is restricted due to license restrictions");
+      .setDescription("Whether output is disabled due to license restrictions");
 
     /**
      * This ModelOutput helper is used for sending dynamic datagrams that are
@@ -172,24 +176,20 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     Output(LX lx) {
       super(lx);
-      this.restricted.addListener((p) -> {
-        if (this.restricted.isOn()) {
-          final int myPoints = lx.model.size;
-          final int limitPoints = lx.permissions.getMaxPoints();
-          final String outputError =
-            (limitPoints == 0) ?
-              "Your license level does not support sending live network output, it will be disabled." :
-              ("You have exceeded the maximum number of points allowed by your license (" + myPoints + " > " + limitPoints + "). Output will be disabled.");
-          lx.pushError(null, outputError);
-        }
-      });
-
+      this.gammaMode.setValue(GammaMode.DIRECT);
       try {
         addChild(new ModelOutput(lx));
       } catch (SocketException sx) {
         lx.pushError(sx, "Serious network error, could not create output socket. Program will continue with no network output.\n" + sx.getLocalizedMessage());
         LXOutput.error("Could not create output datagram socket, model will not be able to send");
       }
+      this.restricted.addListener(p -> {
+        if (this.restricted.isOn()) {
+          LXOutput.error("Network output is disabled due to license restrictions.");
+        } else {
+          LXOutput.log("Network output restored.");
+        }
+      });
     }
 
     @Override
@@ -258,6 +258,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       System.arraycopy(that.aux, 0, this.aux, 0, this.aux.length);
     }
 
+    public int[] getColors(boolean aux) {
+      return aux ? getAuxColors() : getColors();
+    }
+
     public int[] getColors() {
       return this.cueOn ? this.cue : this.main;
     }
@@ -322,17 +326,20 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   private final DoubleBuffer buffer;
 
-  public final BooleanParameter isMultithreaded = new BooleanParameter("Threaded", false)
-  .setMappable(false)
-  .setDescription("Whether the engine and UI are on separate threads");
+  public final BooleanParameter isMultithreaded =
+    new BooleanParameter("Threaded", false)
+    .setMappable(false)
+    .setDescription("Whether the engine and UI are on separate threads");
 
-  public final BooleanParameter isChannelMultithreaded = new BooleanParameter("Channel Threaded", false)
-  .setMappable(false)
-  .setDescription("Whether the engine is multi-threaded per channel");
+  public final BooleanParameter isChannelMultithreaded =
+    new BooleanParameter("Channel Threaded", false)
+    .setMappable(false)
+    .setDescription("Whether the engine is multi-threaded per channel");
 
-  public final BooleanParameter isNetworkMultithreaded = new BooleanParameter("Network Threaded", false)
-  .setMappable(false)
-  .setDescription("Whether the network output is on a separate thread");
+  public final BooleanParameter isNetworkMultithreaded =
+    new BooleanParameter("Network Threaded", false)
+    .setMappable(false)
+    .setDescription("Whether the network output is on a separate thread");
 
   private Thread engineThread = null;
   private final ExecutorService engineExecutorService;
@@ -346,12 +353,16 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   private static final long INIT_RUN = -1;
   private long lastMillis = INIT_RUN;
+  private long lastNanoTime = INIT_RUN;
+  private long autoSaveMillis = INIT_RUN;
 
   private double fixedDeltaMs = 0;
 
   /**
    * Globally accessible counter of the current millisecond clock
    */
+
+  public long nowNanoTime = System.nanoTime();
   public long nowMillis = System.currentTimeMillis();
 
   LXEngine(final LX lx) {
@@ -424,6 +435,15 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     addParameter("framesPerSecond", this.framesPerSecond);
     addParameter("speed", this.speed);
     addParameter("performanceMode", this.performanceMode);
+
+    // Log messages for restriction state
+    this.restricted.addListener(p -> {
+      if (this.restricted.isOn()) {
+        LX.error("Rendering engine disabled due to license restrictions.");
+      } else {
+        LX.log("Rendering engine restored within license limits.");
+      }
+    });
   }
 
   public void logProfiler() {
@@ -432,7 +452,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   @Override
   public String getPath() {
-    return "lx";
+    return LXPath.ROOT;
   }
 
   public LXEngine setInputDispatch(Dispatch inputDispatch) {
@@ -997,28 +1017,33 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     this.hasStarted = true;
 
-    long runStart = System.nanoTime();
+    final long runStart = this.nowNanoTime = System.nanoTime();
 
     // Compute elapsed time
     this.nowMillis = System.currentTimeMillis();
     if (this.lastMillis == INIT_RUN) {
       // Initial frame is set to be the framerate
-      this.lastMillis = this.nowMillis - (long) (1000f / framesPerSecond.getValuef());
+      this.lastNanoTime = this.nowNanoTime - (long) (1000000000. / this.framesPerSecond.getValue());
+      this.lastMillis = this.nowMillis - (long) (1000f / this.framesPerSecond.getValuef());
+      this.autoSaveMillis = this.lastMillis;
     }
-    double deltaMs = this.nowMillis - this.lastMillis;
+    double deltaMs = (this.nowNanoTime - this.lastNanoTime) / 1000000.;
 
-    // Check for tricky system clock changes!
+    // Check for tricky system clock changes! This should not be necessary now
+    // that we have switched to using nanoTime() for the render loop rather than
+    // currentTimeMillis(), but leaving it in just in case of any weirdness
     if (deltaMs < 0) {
-      LX.error("Negative system clock change detected at System.currentTimeMillis(): " + this.nowMillis);
+      LX.error("Negative system clock change detected from System.nanoTime(): " + this.nowNanoTime);
       // If that happens, just pretend we ran at framerate
       deltaMs = 1000 / framesPerSecond.getValue();
     } else if (deltaMs > 60000) {
       // A frame took over a minute? Was probably a system clock moving forward...
-      LX.error("System clock moved over 60s in a frame, assuming clock change at System.currentTimeMillis(): " + this.nowMillis);
+      LX.error("System.nanoTime() clock moved over 60s in a frame, resetting clock timer: " + this.nowNanoTime);
       deltaMs = 1000 / framesPerSecond.getValue();
     }
 
     this.lastMillis = this.nowMillis;
+    this.lastNanoTime = this.nowNanoTime;
 
     // Override deltaMs if in fixed render mode
     if (this.fixedDeltaMs > 0) {
@@ -1059,6 +1084,13 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // Initialize the model context for this render frame
     this.buffer.render.setModel(this.lx.model);
 
+    // Check render and output state based upon this model
+    final boolean eulaAccepted = !this.lx.permissions.isEulaRequired() || this.lx.preferences.eulaAccepted.isOn();
+    final int maxOutputPoints = this.lx.permissions.getMaxOutputPoints();
+    final int maxRenderPoints = this.lx.permissions.getMaxRenderPoints();
+    this.restricted.setValue((maxRenderPoints >= 0) && (this.buffer.render.main.length > maxRenderPoints));
+    this.output.restricted.setValue((maxOutputPoints >= 0) && (this.buffer.render.main.length > maxOutputPoints));
+
     // Run tempo and audio, always using real-time
     this.lx.engine.tempo.loop(deltaMs);
     this.audio.loop(deltaMs);
@@ -1081,7 +1113,14 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // Okay, time for the real work, to run and blend all of our channels
     // First, set up a bunch of state to keep track of which buffers we
     // are rendering into.
-    this.mixer.loop(buffer.render, deltaMs);
+    if (eulaAccepted && !this.restricted.isOn()) {
+      this.mixer.loop(buffer.render, deltaMs);
+    } else {
+      // Black everything out
+      Arrays.fill(buffer.render.main, LXColor.BLACK);
+      Arrays.fill(buffer.render.cue, LXColor.BLACK);
+      Arrays.fill(buffer.render.aux, LXColor.BLACK);
+    }
 
     // Add fixture identification very last
     int identifyColor = LXColor.hsb(0, 100, Math.abs(-100 + (runStart / 8000000) % 200));
@@ -1145,10 +1184,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       this.buffer.flip();
     }
 
-    final int maxPoints = this.lx.permissions.getMaxPoints();
-    this.output.restricted.setValue((maxPoints >= 0) && (this.buffer.copy.main.length > maxPoints));
-
-    if (!this.output.restricted.isOn()) {
+    if (eulaAccepted && !this.output.restricted.isOn()) {
       if (isNetworkMultithreaded) {
         // Notify the network thread of new work to do!
         synchronized (this.networkThread) {
@@ -1174,6 +1210,14 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     if (this.logProfiler) {
       _logProfiler();
       this.logProfiler = false;
+    }
+
+    // Perform an auto-save if there are modifications to the project
+    if (this.lx.flags.autosave && ((this.nowMillis - this.autoSaveMillis) > this.lx.flags.autosaveIntervalMs)) {
+      if (this.lx.command.isDirty(this.autoSaveMillis)) {
+        this.lx.autoSaveProject();
+      }
+      this.autoSaveMillis = this.nowMillis;
     }
   }
 
@@ -1233,11 +1277,11 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
           this.timer.copyNanos = copyEnd - copyStart;
           try {
             output.send(this.networkFrame.main);
-          } catch (Exception x) {
+          } catch (Throwable x) {
             // TODO(mcslee): For now we don't flag these, there could be ConcurrentModificationException
             // or ArrayIndexBounds exceptions if the model/fixtures are being changed in real-time.
             // This is rare and would only occur at a VERY high framerate.
-            LX.error("Exception in network thread: " + x.getLocalizedMessage());
+            LX.error(x, "Error in network thread: " + x.getLocalizedMessage());
           }
           this.timer.sendNanos = System.nanoTime() - copyEnd;
         }
@@ -1322,21 +1366,44 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     // Invoke super-loader
     super.load(lx, obj);
+
+    // Override project output mode if flag is set
+    switch (lx.flags.outputMode) {
+    case ACTIVE:
+      this.output.enabled.setValue(true);
+      break;
+    case INACTIVE:
+      this.output.enabled.setValue(false);
+      break;
+    default:
+      break;
+    }
   }
 
   @Override
   public void dispose() {
     this.midi.disposeSurfaces();
-    this.modulation.dispose();
-    this.mixer.dispose();
-    this.audio.dispose();
-    this.midi.dispose();
-    this.osc.dispose();
-    this.dmx.dispose();
-    this.tempo.dispose();
+
+    // Shutdown the project content first, which may depend upon plugins
+    LX.dispose(this.modulation);
+    LX.dispose(this.mixer);
+
+    // Remove plugins now, they may depend upon the lower layer components
+    this.lx.registry.disposePlugins();
+
+    // Remove core engine components
+    LX.dispose(this.audio);
+    LX.dispose(this.midi);
+    LX.dispose(this.osc);
+    LX.dispose(this.dmx);
+    LX.dispose(this.tempo);
+
+    // Kill network thread if it exists
     synchronized (this.networkThread) {
       this.networkThread.interrupt();
     }
+
+    // Clean up engine parameters
     super.dispose();
   }
 

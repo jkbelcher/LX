@@ -47,6 +47,13 @@ public class LXVector {
   public final int index;
 
   /**
+   * Construct a mutable vector
+   */
+  public LXVector() {
+    this(0, 0, 0);
+  }
+
+  /**
    * Construct a mutable vector based on an LXPoint
    *
    * @param point Point with index reference
@@ -126,6 +133,13 @@ public class LXVector {
     return this;
   }
 
+  public LXVector add(LXVector that, float amount) {
+    this.x += that.x * amount;
+    this.y += that.y * amount;
+    this.z += that.z * amount;
+    return this;
+  }
+
   public LXVector sub(float x, float y) {
     this.x -= x;
     this.y -= y;
@@ -150,6 +164,13 @@ public class LXVector {
     this.x *= n;
     this.y *= n;
     this.z *= n;
+    return this;
+  }
+
+  public LXVector mult(LXVector that) {
+    this.x *= that.x;
+    this.y *= that.y;
+    this.z *= that.z;
     return this;
   }
 

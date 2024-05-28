@@ -14,7 +14,7 @@
  * PURPOSE, WITH RESPECT TO THE SOFTWARE.
  *
  * @author Mark C. Slee <mark@heronarts.com>
- * @author Justin K. Blecher <jkbelcher@gmail.com>
+ * @author Justin K. Belcher <jkbelcher@gmail.com>
  */
 
 package heronarts.lx.snapshot;
@@ -374,7 +374,7 @@ public class LXSnapshotEngine extends LXComponent implements LXOscComponent, LXL
       this.autoCycleCursor.decrement();
     }
     this.autoCycleCursor.setRange(NO_SNAPSHOT_INDEX, this.snapshots.size());
-    snapshot.dispose();
+    LX.dispose(snapshot);
     return this;
   }
 
@@ -650,9 +650,9 @@ public class LXSnapshotEngine extends LXComponent implements LXOscComponent, LXL
       views = findSnapshotViews(views, component, snapshot);
     }
     for (LXBus bus : this.lx.engine.mixer.channels) {
-      findSnapshotViews(views, component, bus);
+      views = findSnapshotViews(views, component, bus);
     }
-    findSnapshotViews(views, component, this.lx.engine.mixer.masterBus);
+    views = findSnapshotViews(views, component, this.lx.engine.mixer.masterBus);
     return views;
   }
 
@@ -683,9 +683,9 @@ public class LXSnapshotEngine extends LXComponent implements LXOscComponent, LXL
       views = findSnapshotParameterViews(views, parameter, snapshot);
     }
     for (LXBus bus : this.lx.engine.mixer.channels) {
-      findSnapshotParameterViews(views, parameter, bus);
+      views = findSnapshotParameterViews(views, parameter, bus);
     }
-    findSnapshotParameterViews(views, parameter, this.lx.engine.mixer.masterBus);
+    views = findSnapshotParameterViews(views, parameter, this.lx.engine.mixer.masterBus);
     return views;
   }
 

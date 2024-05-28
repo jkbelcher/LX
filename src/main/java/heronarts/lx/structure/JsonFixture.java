@@ -47,6 +47,7 @@ import heronarts.lx.LX;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.model.LXPoint;
 import heronarts.lx.output.ArtSyncDatagram;
+import heronarts.lx.output.KinetDatagram;
 import heronarts.lx.output.LXBufferOutput;
 import heronarts.lx.output.LXDatagram;
 import heronarts.lx.output.LXOutput;
@@ -152,6 +153,7 @@ public class JsonFixture extends LXFixture {
   private static final String KEY_UNIVERSE = "universe";
   private static final String KEY_DDP_DATA_OFFSET = "dataOffset";
   private static final String KEY_KINET_PORT = "kinetPort";
+  private static final String KEY_KINET_VERSION = "kinetVersion";
   private static final String KEY_OPC_CHANNEL = "channel";
   private static final String KEY_CHANNEL = "channel";
   private static final String KEY_PRIORITY = "priority";
@@ -162,9 +164,13 @@ public class JsonFixture extends LXFixture {
   private static final String KEY_COMPONENT_ID = "componentId";
   private static final String KEY_NUM = "num";
   private static final String KEY_STRIDE = "stride";
+  private static final String KEY_PAD_PRE = "padPre";
+  private static final String KEY_PAD_POST = "padPost";
   private static final String KEY_REPEAT = "repeat";
   private static final String KEY_DUPLICATE = "duplicate";
   private static final String KEY_REVERSE = "reverse";
+  private static final String KEY_HEADER_BYTES = "headerBytes";
+  private static final String KEY_FOOTER_BYTES = "footerBytes";
   private static final String KEY_SEGMENTS = "segments";
 
   // Metadata
@@ -492,10 +498,11 @@ public class JsonFixture extends LXFixture {
     private final int channel;
     private final int priority;
     private final boolean sequenceEnabled;
+    private final KinetDatagram.Version kinetVersion;
     private final float fps;
     private final List<JsonSegmentDefinition> segments;
 
-    private JsonOutputDefinition(LXFixture fixture, JsonProtocolDefinition protocol, JsonTransportDefinition transport, JsonByteEncoderDefinition byteOrder, InetAddress address, int port, int universe, int channel, int priority, boolean sequenceEnabled, float fps, List<JsonSegmentDefinition> segments) {
+    private JsonOutputDefinition(LXFixture fixture, JsonProtocolDefinition protocol, JsonTransportDefinition transport, JsonByteEncoderDefinition byteOrder, InetAddress address, int port, int universe, int channel, int priority, boolean sequenceEnabled, KinetDatagram.Version kinetVersion, float fps, List<JsonSegmentDefinition> segments) {
       this.fixture = fixture;
       this.protocol = protocol;
       this.transport = transport;
@@ -506,6 +513,7 @@ public class JsonFixture extends LXFixture {
       this.channel = channel;
       this.priority = priority;
       this.sequenceEnabled = sequenceEnabled;
+      this.kinetVersion = kinetVersion;
       this.fps = fps;
       this.segments = segments;
     }
@@ -517,18 +525,26 @@ public class JsonFixture extends LXFixture {
     private final int num;
     private final int stride;
     private final int repeat;
+    private final int padPre;
+    private final int padPost;
+    private final byte[] headerBytes;
+    private final byte[] footerBytes;
     private final boolean reverse;
 
     // May or may not be specified, if null then the parent output definition is used
     private final JsonByteEncoderDefinition byteEncoder;
 
-    private JsonSegmentDefinition(int start, int num, int stride, int repeat, boolean reverse, JsonByteEncoderDefinition byteEncoder) {
+    private JsonSegmentDefinition(int start, int num, int stride, int repeat, int padPre, int padPost, boolean reverse, JsonByteEncoderDefinition byteEncoder, byte[] headerBytes, byte[] footerBytes) {
       this.start = start;
       this.num = num;
       this.stride = stride;
       this.repeat = repeat;
       this.reverse = reverse;
+      this.padPre = padPre;
+      this.padPost = padPost;
       this.byteEncoder = byteEncoder;
+      this.headerBytes = headerBytes;
+      this.footerBytes = footerBytes;
     }
   }
 
@@ -618,6 +634,14 @@ public class JsonFixture extends LXFixture {
     super.onParameterChanged(p);
   }
 
+  public String getFixturePath() {
+    String name = this.fixtureType.getString();
+    if (!LXUtils.isEmpty(name)) {
+      return name + ".lxf";
+    }
+    return "";
+  }
+
   private void addJsonParameter(ParameterDefinition parameter) {
     if (this.definedParameters.containsKey(parameter.name)) {
       addWarning("Cannot define two parameters of same name: " + parameter.name);
@@ -669,7 +693,7 @@ public class JsonFixture extends LXFixture {
 
     // Clear the children
     for (LXFixture child : this.children) {
-      child.dispose();
+      LX.dispose(child);
     }
     this.mutableChildren.clear();
     this.componentsById.clear();
@@ -790,11 +814,15 @@ public class JsonFixture extends LXFixture {
       String parameterValue = "";
 
       if (KEY_INSTANCE.equals(parameterName)) {
-        parameterValue = String.valueOf(this.currentChildInstance);
         if (returnType == ParameterType.BOOLEAN) {
           addWarning("Cannot load non-boolean parameter $" + parameterName + " into a boolean type: " + key);
           return null;
         }
+        if (this.currentChildInstance < 0) {
+          addWarning("Cannot reference variable $" + parameterName + " when \"" + KEY_INSTANCES + "\" has not been declared");
+          return null;
+        }
+        parameterValue = String.valueOf(this.currentChildInstance);
       } else if (KEY_INSTANCES.equals(parameterName)) {
         parameterValue = String.valueOf(this.currentNumInstances);
         if (returnType == ParameterType.BOOLEAN) {
@@ -2125,6 +2153,20 @@ public class JsonFixture extends LXFixture {
       }
     }
 
+    KinetDatagram.Version kinetVersion = KinetDatagram.Version.PORTOUT;
+    if (protocol == JsonProtocolDefinition.KINET) {
+      if (outputObj.has(KEY_KINET_VERSION)) {
+        String key = loadString(outputObj, KEY_KINET_VERSION, true, "Output must specify valid KiNET version of PORTOUT or DMXOUT");
+        if (key != null) {
+          try {
+            kinetVersion = KinetDatagram.Version.valueOf(key.toUpperCase());
+          } catch (Exception x) {
+            addWarning("Output specifies an invalid KiNET version: " + key);
+          }
+        }
+      }
+    }
+
     final boolean sequenceEnabled = loadBoolean(outputObj, KEY_SEQUENCE_ENABLED, true, "Output " + KEY_SEQUENCE_ENABLED + " must be a valid boolean");
 
     // Top level output byte-order
@@ -2134,7 +2176,7 @@ public class JsonFixture extends LXFixture {
     List<JsonSegmentDefinition> segments = new ArrayList<JsonSegmentDefinition>();
     loadSegments(fixture, segments, outputObj, byteOrder);
 
-    this.definedOutputs.add(new JsonOutputDefinition(fixture, protocol, transport, byteOrder, address, port, universe, channel, priority, sequenceEnabled, fps, segments));
+    this.definedOutputs.add(new JsonOutputDefinition(fixture, protocol, transport, byteOrder, address, port, universe, channel, priority, sequenceEnabled, kinetVersion, fps, segments));
   }
 
   private void loadBrightness(LXFixture child, JsonObject childObj) {
@@ -2163,7 +2205,7 @@ public class JsonFixture extends LXFixture {
     }
   }
 
-  private static final String[] SEGMENT_KEYS = { KEY_NUM, KEY_START, KEY_COMPONENT_INDEX, KEY_COMPONENT_ID, KEY_STRIDE, KEY_REVERSE };
+  private static final String[] SEGMENT_KEYS = { KEY_NUM, KEY_START, KEY_COMPONENT_INDEX, KEY_COMPONENT_ID, KEY_STRIDE, KEY_REVERSE, KEY_PAD_PRE, KEY_PAD_POST, KEY_HEADER_BYTES, KEY_FOOTER_BYTES };
 
   private void loadSegments(LXFixture fixture, List<JsonSegmentDefinition> segments, JsonObject outputObj, JsonByteEncoderDefinition defaultByteOrder) {
     if (outputObj.has(KEY_SEGMENTS)) {
@@ -2229,9 +2271,6 @@ public class JsonFixture extends LXFixture {
       num -= offset;
 
     } else if (segmentObj.has(KEY_COMPONENT_INDEX)) {
-      if (segmentObj.has(KEY_START)) {
-        addWarning("Output specifies " + KEY_COMPONENT_INDEX + ", ignoring " + KEY_START);
-      }
       if (!(fixture instanceof JsonFixture)) {
         addWarning("Output " + KEY_COMPONENT_INDEX + " may only be used on custom fixtures");
         return;
@@ -2290,6 +2329,18 @@ public class JsonFixture extends LXFixture {
       }
     }
 
+    int padPre = 0, padPost = 0;
+    if (segmentObj.has(KEY_PAD_PRE)) {
+      padPre = loadInt(segmentObj, KEY_PAD_PRE, true, "Output " + KEY_PAD_PRE + " must be a valid integer");
+    }
+    if (segmentObj.has(KEY_PAD_POST)) {
+      padPost = loadInt(segmentObj, KEY_PAD_POST, true, "Output " + KEY_PAD_POST+ " must be a valid integer");
+    }
+    if (padPre < 0 || padPost < 0) {
+      addWarning("Output padding must be a non-negative value");
+      return;
+    }
+
     boolean reverse = loadBoolean(segmentObj, KEY_REVERSE, true, "Output " + KEY_REVERSE + " must be a valid boolean");
 
     JsonByteEncoderDefinition segmentByteOrder = null;
@@ -2309,11 +2360,66 @@ public class JsonFixture extends LXFixture {
       }
     }
 
+    // Static header / footer bytes
+    byte[] headerBytes = loadStaticBytes(segmentObj, KEY_HEADER_BYTES);
+    byte[] footerBytes = loadStaticBytes(segmentObj, KEY_FOOTER_BYTES);
+
     // Duplicate the definition N times (typically 1)
-    final JsonSegmentDefinition segment = new JsonSegmentDefinition(start, num, stride, repeat, reverse, segmentByteOrder);
+    final JsonSegmentDefinition segment = new JsonSegmentDefinition(start, num, stride, repeat, padPre, padPost, reverse, segmentByteOrder, headerBytes, footerBytes);
     for (int i = 0; i < duplicate; ++i) {
       segments.add(segment);
     }
+  }
+
+  private byte[] loadStaticBytes(JsonObject segmentObj, String key) {
+    if (segmentObj.has(key)) {
+      final JsonElement elem = segmentObj.get(key);
+
+      if (elem.isJsonPrimitive() && elem.getAsJsonPrimitive().isString()) {
+        // Static bytes supplied as a hex string
+        final String hex = elem.getAsJsonPrimitive().getAsString();
+        if (hex.isEmpty() || (hex.length() % 2) != 0) {
+          addWarning("Byte hex string " + key + " must have positive, even length");
+          return null;
+        }
+        final byte[] bytes = new byte[hex.length() / 2];
+        try {
+          int b = 0;
+          for (int offset = 0; offset < hex.length(); offset += 2) {
+            bytes[b++] = (byte) Integer.parseInt(hex.substring(offset, offset+2), 16);
+          }
+        } catch (NumberFormatException nfx) {
+          addWarning("Bad hex byte string " + key + ": " + hex);
+          return null;
+        }
+        return bytes;
+      } else if (elem.isJsonArray()) {
+        // Static bytes as an array of numeric values
+        final JsonArray arr = elem.getAsJsonArray();
+        if (arr.size() == 0) {
+          addWarning("Byte array for " + key + " is empty");
+          return null;
+        }
+        final byte[] bytes = new byte[arr.size()];
+        for (int i = 0; i < arr.size(); ++i) {
+          final JsonElement byteElem = arr.get(i);
+          try {
+            // GSON doesn't handle 0x prefixed hex numbers natively, they come back as strings
+            if (byteElem.getAsJsonPrimitive().isString() && byteElem.getAsString().toLowerCase().startsWith("0x")) {
+              bytes[i] = (byte) Integer.parseInt(byteElem.getAsString().substring(2), 16);
+            } else {
+              bytes[i] = (byte) byteElem.getAsJsonPrimitive().getAsInt();
+            }
+          } catch (Exception x) {
+            addWarning("Bad byte value " + key + "[" + i + "] = " + byteElem);
+          }
+        }
+        return bytes;
+      } else {
+        addWarning("Bad static byte data for " + key + ": " + elem);
+      }
+    }
+    return null;
   }
 
   private JsonByteEncoderDefinition loadByteOrder(JsonObject obj, JsonByteEncoderDefinition defaultByteOrder) {
@@ -2384,8 +2490,12 @@ public class JsonFixture extends LXFixture {
         num,
         segment.stride,
         segment.repeat,
+        segment.padPre,
+        segment.padPost,
         segment.reverse,
-        (segment.byteEncoder != null) ? segment.byteEncoder.byteEncoder : output.byteEncoder.byteEncoder
+        (segment.byteEncoder != null) ? segment.byteEncoder.byteEncoder : output.byteEncoder.byteEncoder,
+        segment.headerBytes,
+        segment.footerBytes
        ));
     }
 
@@ -2399,6 +2509,7 @@ public class JsonFixture extends LXFixture {
       output.channel,
       output.priority,
       output.sequenceEnabled,
+      output.kinetVersion,
       output.fps,
       segments.toArray(new Segment[0])
     ));

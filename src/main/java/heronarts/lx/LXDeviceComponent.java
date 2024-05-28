@@ -18,9 +18,6 @@
 
 package heronarts.lx;
 
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -30,18 +27,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.stream.JsonWriter;
-
 import heronarts.lx.midi.LXMidiListener;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.midi.MidiFilterParameter;
+import heronarts.lx.midi.MidiPanic;
 import heronarts.lx.midi.surface.LXMidiSurface;
 import heronarts.lx.mixer.LXAbstractChannel;
+import heronarts.lx.mixer.LXMasterBus;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.modulation.LXModulationContainer;
 import heronarts.lx.modulation.LXModulationEngine;
@@ -52,7 +47,6 @@ import heronarts.lx.parameter.LXListenableNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
 import heronarts.lx.parameter.MutableParameter;
-import heronarts.lx.parameter.StringParameter;
 import heronarts.lx.structure.view.LXViewDefinition;
 import heronarts.lx.structure.view.LXViewEngine;
 
@@ -60,7 +54,7 @@ import heronarts.lx.structure.view.LXViewEngine;
  * A component which may have its own scoped user-level modulators. The concrete subclasses
  * of this are Patterns and Effects.
  */
-public abstract class LXDeviceComponent extends LXLayeredComponent implements LXModulationContainer, LXOscComponent, LXMidiListener {
+public abstract class LXDeviceComponent extends LXLayeredComponent implements LXPresetComponent, LXModulationContainer, LXOscComponent, LXMidiListener {
 
   /**
    * Marker interface that indicates this device implements MIDI functionality
@@ -114,10 +108,6 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     new BooleanParameter("Modulation Expanded", false)
     .setDescription("Whether the device modulation section is expanded");
 
-  public final StringParameter presetFile =
-    new StringParameter("Preset", null)
-    .setDescription("Name of last preset file that has been loaded/saved");
-
   public final MidiFilterParameter midiFilter =
     new MidiFilterParameter("MIDI Filter", true)
     .setDescription("MIDI filter settings for this device");
@@ -155,9 +145,8 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     addInternalParameter("expandedCue", this.controlsExpandedCue);
     addInternalParameter("expandedAux", this.controlsExpandedAux);
     addInternalParameter("modulationExpanded", this.modulationExpanded);
-    addInternalParameter("presetFile", this.presetFile);
-    addInternalParameter("midiFilter", this.midiFilter);
 
+    addParameter("midiFilter", this.midiFilter);
     addParameter("view", this.view = lx.structure.views.newViewSelector("View", "Model view selector for this device"));
     addParameter("viewPriority", this.viewPriority = lx.structure.views.newViewSelectorPriority("View", "Priority model view selector for this device"));
 
@@ -181,6 +170,8 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     LXComponent parent = getParent();
     if (parent instanceof LXAbstractChannel) {
       return ((LXAbstractChannel) parent).getModelView();
+    } else if (parent instanceof LXMasterBus) {
+      return lx.model;
     }
     return getModel();
   }
@@ -228,6 +219,21 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
   }
 
   /**
+   * Returns whether this parameter is stored along with snapshots
+   *
+   * @param parameter Parameter
+   * @return true if this can be included in snapshots
+   */
+  public boolean isSnapshotControl(LXParameter parameter) {
+    return !(
+      (parameter == this.label) ||
+      (parameter == this.midiFilter) ||
+      (parameter == this.viewPriority)
+    );
+
+  }
+
+  /**
    * Returns whether this parameter is visible in default remote control
    * or device control UIs
    *
@@ -236,6 +242,7 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
    */
   public boolean isHiddenControl(LXParameter parameter) {
     return
+      (parameter == this.midiFilter) ||
       (parameter == this.view) ||
       (parameter == this.viewPriority);
   }
@@ -259,6 +266,10 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     if (this.defaultRemoteControls == null) {
       List<LXListenableNormalizedParameter> remoteControls = new ArrayList<LXListenableNormalizedParameter>();
       for (LXParameter parameter : getParameters()) {
+        // No hidden controls please!
+        if (isHiddenControl(parameter)) {
+          continue;
+        }
         // Do not include subparams of AggregateParameter
         if (parameter.getParentParameter() != null) {
           continue;
@@ -271,9 +282,7 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
           }
         } else if (parameter instanceof LXListenableNormalizedParameter) {
           // Otherwise include any parameter of a knob-able type
-          if (!isHiddenControl(parameter)) {
-            remoteControls.add((LXListenableNormalizedParameter) parameter);
-          }
+          remoteControls.add((LXListenableNormalizedParameter) parameter);
         }
       }
       this.defaultRemoteControls = remoteControls.toArray(new LXListenableNormalizedParameter[0]);
@@ -354,7 +363,10 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
    * @param message Message
    */
   public void midiDispatch(LXShortMessage message) {
-    if (this.midiFilter.filter(message)) {
+    if (message instanceof MidiPanic) {
+      this.midiFilter.midiPanic();
+      message.dispatch(this);
+    } else if (this.midiFilter.filter(message)) {
       message.dispatch(this);
     }
     getModulationEngine().midiDispatch(message);
@@ -368,43 +380,6 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
   }
 
   protected static final String KEY_DEVICE_VERSION = "deviceVersion";
-  private final static String KEY_VERSION = "version";
-  private final static String KEY_TIMESTAMP = "timestamp";
-
-  public void loadPreset(File file) {
-    try (FileReader fr = new FileReader(file)) {
-      JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
-      this.lx.componentRegistry.projectLoading = true;
-      this.lx.componentRegistry.setIdCounter(this.lx.getMaxId(obj, this.lx.componentRegistry.getIdCounter()) + 1);
-      load(this.lx, obj);
-      this.lx.componentRegistry.projectLoading = false;
-      this.presetFile.setValue(file.getName());
-      LX.log("Device preset loaded successfully from " + file.toString());
-    } catch (IOException iox) {
-      LX.error("Could not load device preset file: " + iox.getLocalizedMessage());
-      this.lx.pushError(iox, "Could not load device preset file: " + iox.getLocalizedMessage());
-    } catch (Exception x) {
-      LX.error(x, "Exception in loadPreset: " + x.getLocalizedMessage());
-      this.lx.pushError(x, "Exception in loadPreset: " + x.getLocalizedMessage());
-    } finally {
-      this.lx.componentRegistry.projectLoading = false;
-    }
-  }
-
-  public void savePreset(File file) {
-    JsonObject obj = new JsonObject();
-    obj.addProperty(KEY_VERSION, LX.VERSION);
-    obj.addProperty(KEY_TIMESTAMP, System.currentTimeMillis());
-    save(this.lx, obj);
-    try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
-      writer.setIndent("  ");
-      new GsonBuilder().create().toJson(obj, writer);
-      this.presetFile.setValue(file.getName());
-      LX.log("Device preset saved successfully to " + file.toString());
-    } catch (IOException iox) {
-      LX.error(iox, "Could not write device preset to output file: " + file.toString());
-    }
-  }
 
   private static final String KEY_REMOTE_CONTROLS = "remoteControls";
 

@@ -19,7 +19,6 @@
 package heronarts.lx.midi.surface;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.google.gson.JsonElement;
@@ -69,10 +68,10 @@ public abstract class LXMidiSurface implements LXMidiListener, LXSerializable, L
     .setMappable(false)
     .setDescription("Whether the control surface is enabled");
 
-  protected final Map<String, LXParameter> mutableSettings = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection mutableSettings = new LXParameter.Collection();
   public final Map<String, LXParameter> settings = Collections.unmodifiableMap(this.mutableSettings);
 
-  protected final Map<String, LXParameter> mutableState = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection mutableState = new LXParameter.Collection();
   public final Map<String, LXParameter> state = Collections.unmodifiableMap(this.mutableState);
 
   // Internal flag for enabled state, pre/post-teardown
@@ -187,6 +186,7 @@ public abstract class LXMidiSurface implements LXMidiListener, LXSerializable, L
     return false;
   }
 
+  public static final String KEY_CLASS = "class";
   public static final String KEY_NAME = "name";
   public static final String KEY_SETTINGS = "settings";
   public static final String KEY_STATE = "state";
@@ -194,38 +194,37 @@ public abstract class LXMidiSurface implements LXMidiListener, LXSerializable, L
   @Override
   public void load(LX lx, JsonObject obj) {
     if (obj.has(KEY_SETTINGS)) {
-      JsonElement settingsElem = obj.get(KEY_SETTINGS);
+      final JsonElement settingsElem = obj.get(KEY_SETTINGS);
       if (settingsElem.isJsonObject()) {
-        JsonObject settingsObj = settingsElem.getAsJsonObject();
-        for (String path : this.settings.keySet()) {
-          LXSerializable.Utils.loadParameter(settings.get(path), settingsObj, path);
-        }
+        LXSerializable.Utils.loadParameters(settingsElem.getAsJsonObject(), this.mutableSettings);
       }
     }
     if (obj.has(KEY_STATE)) {
-      JsonElement stateElem = obj.get(KEY_STATE);
+      final JsonElement stateElem = obj.get(KEY_STATE);
       if (stateElem.isJsonObject()) {
-        JsonObject stateObj = stateElem.getAsJsonObject();
-        for (String path : this.state.keySet()) {
-          LXSerializable.Utils.loadParameter(state.get(path), stateObj, path);
-        }
+        LXSerializable.Utils.loadParameters(stateElem.getAsJsonObject(), this.mutableState);
       }
     }
   }
 
   @Override
   public void save(LX lx, JsonObject obj) {
-    obj.addProperty(KEY_NAME, this.input.getName());
+    obj.addProperty(KEY_CLASS, getClass().getName());
+    obj.addProperty(KEY_NAME, getName());
     if (!this.settings.isEmpty()) {
-      JsonObject settings = new JsonObject();
-      LXSerializable.Utils.saveParameters(settings, this.settings);
-      obj.add(KEY_SETTINGS, settings);
+      obj.add(KEY_SETTINGS, LXSerializable.Utils.saveParameters(this.mutableSettings));
     }
     if (!this.state.isEmpty()) {
-      JsonObject state = new JsonObject();
-      LXSerializable.Utils.saveParameters(state, this.state);
-      obj.add(KEY_STATE, state);
+      obj.add(KEY_STATE, LXSerializable.Utils.saveParameters(this.mutableState));
     }
+  }
+
+  public boolean matches(JsonObject surface) {
+    // NOTE: legacy compabitility, pre-1.0.1 didn't store the surface CLASS
+    // here when there was only one surface type per device name supported
+    final String surfaceClass = surface.has(KEY_CLASS) ? surface.get(KEY_CLASS).getAsString() : null;
+    return getName().equals(surface.get(KEY_NAME).getAsString()) &&
+      ((surfaceClass == null) || surfaceClass.equals(getClass().getName()));
   }
 
   @Override

@@ -32,6 +32,7 @@ public class NormalizedParameter implements LXNormalizedParameter {
   private String description = null;
   private double value = 0;
   private boolean mappable = true;
+  private Formatter formatter = null;
 
   public NormalizedParameter(String label) {
     this(label, 0);
@@ -77,7 +78,13 @@ public class NormalizedParameter implements LXNormalizedParameter {
 
   @Override
   public Formatter getFormatter() {
-    return getUnits();
+    return (this.formatter != null) ? this.formatter : getUnits();
+  }
+
+  @Override
+  public NormalizedParameter setFormatter(Formatter formatter) {
+    this.formatter = formatter;
+    return this;
   }
 
   @Override
@@ -112,11 +119,6 @@ public class NormalizedParameter implements LXNormalizedParameter {
   }
 
   @Override
-  public float getValuef() {
-    return (float) getValue();
-  }
-
-  @Override
   public String getLabel() {
     return this.label;
   }
@@ -141,6 +143,7 @@ public class NormalizedParameter implements LXNormalizedParameter {
     return 1;
   }
 
+  @Override
   public boolean isMappable() {
     return this.mappable;
   }

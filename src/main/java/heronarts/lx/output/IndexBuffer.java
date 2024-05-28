@@ -36,10 +36,22 @@ import heronarts.lx.parameter.LXParameter;
 public class IndexBuffer {
 
   /**
+   * Placeholder value that can be used in index buffers to output an empty
+   * pixel with all byte values of 0, rather than a value from the colors
+   * array.
+   */
+  public static final int EMPTY_PIXEL = -1;
+
+  /**
    * A Segment is a continous portion of an index buffer which specifies the indices
    * into the final color buffer which are to be sent, along with the byte ordering.
    */
   public static class Segment {
+    /**
+     * Static bytes to be sent.
+     */
+    public final byte[] staticBytes;
+
     /**
      * Globally indexed buffer of point indices in this segment, relative to master
      * color buffer.
@@ -63,8 +75,9 @@ public class IndexBuffer {
     public final int endChannel;
 
     /**
-     * Total length of this segment in bytes, which is a function of both the number
-     * of points and the byte ordering.
+     * Total length of this segment in bytes, which is either a function of the number
+     * of points and byte ordering for dynamic segments, or a static buffer length
+     * for static byte segments
      */
     public final int byteLength;
 
@@ -114,10 +127,31 @@ public class IndexBuffer {
     public Segment(int[] indices, LXBufferOutput.ByteEncoder byteEncoder, int channel, LXParameter brightness) {
       this.indices = indices;
       this.byteEncoder = byteEncoder;
-      this.startChannel = channel;
       this.byteLength = this.indices.length * this.byteEncoder.getNumBytes();
+      this.startChannel = channel;
       this.endChannel = this.startChannel + this.byteLength - 1;
       this.brightness = brightness;
+
+      // Unused here
+      this.staticBytes = null;
+    }
+
+    /**
+     * Segment that represents flat, static byte data
+     *
+     * @param staticBytes Fixed byte array data in the segment
+     * @param channel Channel to copy data at
+     */
+    public Segment(byte[] staticBytes, int channel) {
+      this.staticBytes = staticBytes;
+      this.byteLength = staticBytes.length;
+      this.startChannel = channel;
+      this.endChannel = this.startChannel + this.byteLength - 1;
+
+      // Unused here
+      this.indices = null;
+      this.byteEncoder = null;
+      this.brightness = null;
     }
   }
 

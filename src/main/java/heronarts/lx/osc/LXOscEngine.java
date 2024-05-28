@@ -40,9 +40,11 @@ import com.google.gson.JsonObject;
 
 import heronarts.lx.LX;
 import heronarts.lx.LXComponent;
+import heronarts.lx.audio.ADM;
+import heronarts.lx.audio.Envelop;
+import heronarts.lx.audio.Reaper;
 import heronarts.lx.color.ColorParameter;
 import heronarts.lx.parameter.BooleanParameter;
-import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXNormalizedParameter;
@@ -294,8 +296,8 @@ public class LXOscEngine extends LXComponent {
     if (p instanceof LXOscComponent) {
       return ((LXOscComponent) p).getOscAddress();
     }
-    LXComponent component = p.getParent();
-    if (component instanceof LXOscComponent) {
+    final LXComponent component = p.getParent();
+    if ((component instanceof LXOscComponent) && component.isValidOscParameter(p)) {
       String componentAddress = component.getOscAddress();
       if (componentAddress != null) {
         return componentAddress + "/" + p.getPath();
@@ -321,6 +323,12 @@ public class LXOscEngine extends LXComponent {
         String[] parts = trim.split("/");
         if (parts[1].equals(lx.engine.getPath())) {
           lx.engine.handleOscMessage(message, parts, 2);
+        } else if (parts[1].equals(ADM.ADM_OSC_PATH)) {
+          lx.engine.audio.adm.handleAdmOscMessage(message, parts, 1);
+        } else if (parts[1].equals(Envelop.ENVELOP_OSC_PATH)) {
+          lx.engine.audio.envelop.handleEnvelopOscMessage(message, parts, 1);
+        }  else if (parts[1].equals(Reaper.REAPER_OSC_PATH)) {
+          lx.engine.audio.reaper.handleReaperOscMessage(message, parts, 1);
         } else if (LXOscEngine.this.listeners.isEmpty()) {
           throw new OscException();
         }
@@ -407,29 +415,21 @@ public class LXOscEngine extends LXComponent {
             oscString.setValue(((StringParameter) parameter).getString());
             oscMessage.add(oscString);
           } else if (parameter instanceof ColorParameter) {
-            oscInt.setValue(((ColorParameter) parameter).getColor());
+            oscInt.setValue(((ColorParameter) parameter).getBaseColor());
             oscMessage.add(oscInt);
           } else if (parameter instanceof DiscreteParameter) {
-            oscInt.setValue(((DiscreteParameter) parameter).getValuei());
+            oscInt.setValue(((DiscreteParameter) parameter).getBaseValuei());
             oscMessage.add(oscInt);
-          } else if (parameter instanceof CompoundParameter) {
-            CompoundParameter compoundParameter = (CompoundParameter) parameter;
-            if (compoundParameter.getOscMode() == LXNormalizedParameter.OscMode.ABSOLUTE) {
-              oscFloat.setValue(compoundParameter.getBaseValuef());
-            } else {
-              oscFloat.setValue(compoundParameter.getBaseNormalizedf());
-            }
-            oscMessage.add(oscFloat);
           } else if (parameter instanceof LXNormalizedParameter) {
             LXNormalizedParameter normalizedParameter = (LXNormalizedParameter) parameter;
             if (normalizedParameter.getOscMode() == LXNormalizedParameter.OscMode.ABSOLUTE) {
-              oscFloat.setValue(normalizedParameter.getValuef());
+              oscFloat.setValue(normalizedParameter.getBaseValuef());
             } else {
-              oscFloat.setValue(normalizedParameter.getNormalizedf());
+              oscFloat.setValue(normalizedParameter.getBaseNormalizedf());
             }
             oscMessage.add(oscFloat);
           } else {
-            oscFloat.setValue(parameter.getValuef());
+            oscFloat.setValue(parameter.getBaseValuef());
             oscMessage.add(oscFloat);
           }
           _sendMessage(oscMessage);

@@ -40,6 +40,8 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
 
   private final List<LXLayer> mutableLayers = new ArrayList<LXLayer>();
 
+  private final List<LXLayer> removeLayers = new ArrayList<LXLayer>();
+
   public final List<LXLayer> layers = Collections.unmodifiableList(mutableLayers);
 
   protected final LXPalette palette;
@@ -118,7 +120,14 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
       this.loopingLayer = null;
       throw x;
     }
+    // Remove layers scheduled for deletion
+    for (LXLayer layer : this.removeLayers) {
+      removeLayer(layer);
+    }
+    this.removeLayers.clear();
+
     afterLayers(deltaMs);
+    applyEffects(deltaMs);
 
     this.profiler.loopNanos = System.nanoTime() - loopStart;
   }
@@ -126,6 +135,8 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   protected /* abstract */ void onLoop(double deltaMs) {}
 
   protected /* abstract */ void afterLayers(double deltaMs) {}
+
+  protected /* abstract */ void applyEffects(double deltaMs) {}
 
   private void checkForReentrancy(LXLayer target, String operation) {
     if (this.loopingLayer != null) {
@@ -160,10 +171,16 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   }
 
   protected final LXLayer removeLayer(LXLayer layer) {
-    checkForReentrancy(layer, "remove");
+    if (!this.layers.contains(layer)) {
+      throw new IllegalStateException("Cannot remove layer not in component: " + layer);
+    }
+    if (this.loopingLayer != null) {
+      this.removeLayers.add(layer);
+      return layer;
+    }
     this.mutableLayers.remove(layer);
     _reindexLayers();
-    layer.dispose();
+    LX.dispose(layer);
     return layer;
   }
 
@@ -175,9 +192,10 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   public void dispose() {
     checkForReentrancy(null, "dispose");
     for (LXLayer layer : this.mutableLayers) {
-      layer.dispose();
+      LX.dispose(layer);
     }
     this.mutableLayers.clear();
+    this.removeLayers.clear();
     super.dispose();
   }
 

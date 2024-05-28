@@ -23,7 +23,6 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,362 +40,19 @@ import heronarts.lx.LXComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.command.LXCommand;
 import heronarts.lx.model.LXModel;
-import heronarts.lx.output.ArtNetDatagram;
-import heronarts.lx.output.DDPDatagram;
-import heronarts.lx.output.IndexBuffer;
-import heronarts.lx.output.KinetDatagram;
-import heronarts.lx.output.LXOutput;
-import heronarts.lx.output.OPCDatagram;
-import heronarts.lx.output.OPCSocket;
-import heronarts.lx.output.StreamingACNDatagram;
+import heronarts.lx.model.LXNormalizationBounds;
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.BoundedParameter;
+import heronarts.lx.parameter.EnumParameter;
+import heronarts.lx.parameter.LXListenableParameter;
+import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.StringParameter;
+import heronarts.lx.structure.view.LXViewDefinition;
 import heronarts.lx.structure.view.LXViewEngine;
-import heronarts.lx.utils.LXUtils;
 
 public class LXStructure extends LXComponent implements LXFixtureContainer {
 
   private static final String PROJECT_MODEL = "<Embedded in Project>";
-
-  public class Output extends LXOutput {
-
-    private final List<LXOutput> generatedOutputs = new ArrayList<LXOutput>();
-    private final List<String> outputErrors = new ArrayList<String>();
-    private final List<Packet> packets = new ArrayList<Packet>();
-
-    /**
-     * A packet definition contains the metadata for what will become one output packet or socket.
-     * This is specified by a protocol, transport, network address, and protocol packet signifier,
-     * for instance a universe number in ArtNet / KiNET, or an OPC channel.
-     *
-     * Multiple segments of output may be added to these packets, which requires error-checking
-     * for collisions in which multiple outputs are attempting to send different data to the
-     * same address.
-     */
-    private class Packet {
-
-      private final LXFixture.Protocol protocol;
-      private final LXFixture.Transport transport;
-      private final InetAddress address;
-      private final int port;
-      private final int universe;
-      private int priority;
-      private boolean sequenceEnabled;
-      private float fps = 0f;
-
-      private final List<IndexBuffer.Segment> segments = new ArrayList<IndexBuffer.Segment>();
-
-      private Packet(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, int priority, boolean sequenceEnabled) {
-        this.protocol = protocol;
-        this.transport = transport;
-        this.address = address;
-        this.port = port;
-        this.universe = universe;
-        this.priority = priority;
-        this.sequenceEnabled = sequenceEnabled;
-      }
-
-      private boolean checkOverflow() {
-        switch (this.protocol) {
-        case ARTNET:
-        case SACN:
-          if (this.universe >= ArtNetDatagram.MAX_UNIVERSE) {
-            outputErrors.add(this.protocol.toString() + this.address.toString() + " - overflow univ " + this.universe);
-            return false;
-          }
-          return true;
-        case KINET:
-          if (this.universe >= KinetDatagram.MAX_KINET_PORT) {
-            outputErrors.add(this.protocol.toString() + this.address.toString() + " - overflow port" + this.universe);
-            return false;
-          }
-          return true;
-        case DDP:
-        case OPC:
-        default:
-          outputErrors.add(this.protocol.toString() + this.address.toString() + " - data length overflow");
-          return false;
-        }
-      }
-
-      private void segmentCollision(int collisionStart, int collisionEnd) {
-        String err = this.protocol.toString() + this.address.toString() + " - duplicated ";
-        switch (this.protocol) {
-        case ARTNET:
-        case SACN:
-          err +=
-            "univ " + this.universe +
-            ((collisionStart == collisionEnd) ? (" channel " + collisionStart) : (" channels " + collisionStart + "-" + collisionEnd));
-          break;
-        case KINET:
-          err +=
-            "port " + this.universe +
-            ((collisionStart == collisionEnd) ? (" channel " + collisionStart) : (" channels " + collisionStart + "-" + collisionEnd));
-          break;
-        case DDP:
-          err += "data offset " + this.universe;
-          break;
-        case OPC:
-          err +=
-            "channel " + this.universe +
-            ((collisionStart == collisionEnd) ? (" offset " + collisionStart) : (" offsets " + collisionStart + "-" + collisionEnd));
-          break;
-        case NONE:
-          break;
-        }
-
-        outputErrors.add(err);
-      }
-
-      private void addSegment(LXFixture.Segment segment, int startChannel, int chunkStart, int chunkLength, float fps) {
-        int endChannel = startChannel + segment.numChannels - 1;
-        for (IndexBuffer.Segment existing : this.segments) {
-          // If this one starts before an existing...
-          if (startChannel < existing.startChannel) {
-            // Then check if its end goes over the start, bad news
-            if (endChannel >= existing.startChannel) {
-              segmentCollision(existing.startChannel, LXUtils.min(endChannel, existing.endChannel));
-            }
-          } else if (startChannel <= existing.endChannel) {
-            // If it's start point is before the end of an exiting one, also bad news
-            segmentCollision(startChannel, LXUtils.min(endChannel, existing.endChannel));
-          }
-        }
-
-        // Translate the fixture-scoped Segment into global address space
-        this.segments.add(new IndexBuffer.Segment(segment.toIndexBuffer(chunkStart, chunkLength), segment.byteEncoder, startChannel, segment.getBrightness()));
-
-        // Reduce packet max FPS to the specified limit, if one exists and a lower limit is not already present
-        if (fps > 0) {
-          if ((this.fps == 0) || (fps < this.fps)) {
-            this.fps = fps;
-          }
-        }
-      }
-
-      private IndexBuffer toIndexBuffer() {
-        return new IndexBuffer(this.segments);
-      }
-
-      private LXOutput toOutput() {
-        LXOutput output = null;
-        switch (this.protocol) {
-        case ARTNET:
-          output =
-            new ArtNetDatagram(lx, toIndexBuffer(), this.universe)
-            .setSequenceEnabled(this.sequenceEnabled);
-          break;
-        case SACN:
-          output = new StreamingACNDatagram(lx, toIndexBuffer(), this.universe).setPriority(this.priority);
-          break;
-        case KINET:
-          output = new KinetDatagram(lx, toIndexBuffer(), this.universe);
-          break;
-        case OPC:
-          if (this.transport == LXFixture.Transport.TCP) {
-            output = new OPCSocket(lx, toIndexBuffer(), (byte) this.universe);
-          } else {
-            output = new OPCDatagram(lx, toIndexBuffer(), (byte) this.universe);
-          }
-          break;
-        case DDP:
-          output = new DDPDatagram(lx, toIndexBuffer(), this.universe);
-          break;
-        case NONE:
-          break;
-        }
-        if (output instanceof InetOutput) {
-          ((InetOutput) output).setAddress(this.address).setPort(port);;
-        }
-        if ((output != null) && (this.fps > 0)) {
-          output.framesPerSecond.setValue(this.fps);
-        }
-        return output;
-      }
-    }
-
-    private Packet findPacket(LXFixture.Protocol protocol, LXFixture.Transport transport, InetAddress address, int port, int universe, int priority, boolean sequenceEnabled) {
-      // Check if there's an existing packet for this address space
-      for (Packet packet : this.packets) {
-        if ((packet.protocol == protocol)
-          && (packet.transport == transport)
-          && (packet.address.equals(address))
-          && (packet.port == port)
-          && (packet.universe == universe)) {
-
-          // Priority is the max of any segment contained within
-          packet.priority = LXUtils.max(packet.priority, priority);
-
-          // Sequences enabled if any segment demands it
-          packet.sequenceEnabled = packet.sequenceEnabled || sequenceEnabled;
-
-          return packet;
-        }
-      }
-
-      // Create a new packet for this address space
-      Packet packet = new Packet(protocol, transport, address, port, universe, priority, sequenceEnabled);
-      this.packets.add(packet);
-      return packet;
-    }
-
-    public Output(LX lx) throws SocketException {
-      super(lx);
-      this.gammaMode.setValue(GammaMode.DIRECT);
-    }
-
-    private void clear() {
-      this.packets.clear();
-      for (LXOutput output : this.generatedOutputs) {
-        output.dispose();
-      }
-      this.generatedOutputs.clear();
-      this.outputErrors.clear();
-      outputError.setValue(null);
-    }
-
-    private void rebuildOutputs() {
-      clear();
-
-      // Iterate over all fixtures and build outputs
-      for (LXFixture fixture : fixtures) {
-        rebuildFixtureOutputs(fixture);
-      }
-
-      // Generate an output for all those packets!
-      for (Packet packet : this.packets) {
-        this.generatedOutputs.add(packet.toOutput());
-      }
-
-      // Did errors occur? Oh no!
-      if (!this.outputErrors.isEmpty()) {
-        String str = "Output errors detected.";
-        for (String err : this.outputErrors) {
-          str += "\n" + err;
-        }
-        outputError.setValue(str);
-      }
-    }
-
-    private void rebuildFixtureOutputs(LXFixture fixture) {
-      if (fixture.deactivate.isOn() || !fixture.enabled.isOn()) {
-        return;
-      }
-
-      // First iterate recursively over child outputs
-      for (LXFixture child : fixture.children) {
-        rebuildFixtureOutputs(child);
-      }
-
-      // And every output definition for this fixtures
-      for (LXFixture.OutputDefinition output : fixture.outputDefinitions) {
-        rebuildFixtureOutput(fixture, output);
-      }
-    }
-
-    private void rebuildFixtureOutput(LXFixture fixture, LXFixture.OutputDefinition output) {
-      final LXFixture.Protocol protocol = output.protocol;
-      final LXFixture.Transport transport = output.transport;
-      final InetAddress address = output.address;
-      final int port = output.port;
-      int universe = output.universe;
-      int channel = output.channel;
-      final int priority = output.priority;
-      final boolean sequenceEnabled = output.sequenceEnabled;
-      final float fps = output.fps;
-      boolean overflow = false;
-
-      // Find the starting packet for this output definition
-      Packet packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
-      for (LXFixture.Segment segment : output.segments) {
-        if (overflow) {
-          // Is it okay for this type to overflow?
-          if (!packet.checkOverflow()) {
-            return;
-          }
-          // Roll over to next universe and packet
-          overflow = false;
-          ++universe;
-          channel = 0;
-          packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
-        }
-
-        int chunkStart = 0;
-        int chunkLength = segment.length;
-        int availableBytes = protocol.maxChannels - channel;
-        if (availableBytes <= 0) {
-          outputErrors.add(protocol.toString() + address.toString() + " - invalid channel " + channel + " > " + protocol.maxChannels);
-          return;
-        }
-
-        // Is there not enough available space? If so, chunk the packet
-        while (availableBytes < chunkLength * segment.byteEncoder.getNumBytes()) {
-          // How many indices can fit into the remaining available bytes?
-          int chunkLimit = availableBytes / segment.byteEncoder.getNumBytes();
-
-          // It could be 0, e.g. channel = 510 byteOrder RGB, can't fit an RGB pixel so
-          // we must overflow...
-          if (chunkLimit > 0) {
-            packet.addSegment(segment, channel, chunkStart, chunkLimit, fps);
-            chunkStart += chunkLimit;
-            chunkLength -= chunkLimit;
-          }
-
-          // Is it okay for this type to overflow?
-          if (!packet.checkOverflow()) {
-            return;
-          }
-
-          // Roll over to the next universe and packet
-          ++universe;
-          channel = 0;
-          availableBytes = protocol.maxChannels;
-          packet = findPacket(protocol, transport, address, port, universe, priority, sequenceEnabled);
-        }
-
-        // Add the final chunk (the whole segment in the common case)
-        packet.addSegment(segment, channel, chunkStart, chunkLength, fps);
-        channel += chunkLength * segment.byteEncoder.getNumBytes();
-
-        // Set flag for whether we need to overflow on the next segment
-        overflow = channel >= protocol.maxChannels;
-      }
-    }
-
-    @Override
-    protected void onSend(int[] colors, GammaTable glut, double brightness) {
-      // Send all of the generated outputs
-      for (LXOutput output : this.generatedOutputs) {
-        output.setGammaDelegate(this);
-        output.send(colors, brightness);
-      }
-
-      // Send any direct fixture outputs
-      for (LXFixture fixture : fixtures) {
-        onSendFixture(fixture, colors, brightness);
-      }
-    }
-
-    private void onSendFixture(LXFixture fixture, int[] colors, double brightness) {
-      // Check enabled state of fixture
-      if (!fixture.deactivate.isOn() && fixture.enabled.isOn()) {
-        // Adjust by fixture brightness
-        brightness *= fixture.brightness.getValue();
-
-        // Recursively send all the fixture's children
-        for (LXFixture child : fixture.children) {
-          onSendFixture(child, colors, brightness);
-        }
-
-        // Then send the fixture's own direct packets
-        for (LXOutput output : fixture.outputsDirect) {
-          output.setGammaDelegate(this);
-          output.send(colors, brightness);
-        }
-      }
-    }
-
-  }
 
   /**
    * Implementation-only interface to relay model changes back to the core LX
@@ -438,6 +94,22 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     public void fixtureMoved(LXFixture fixture, int index);
   }
 
+  public enum NormalizationMode {
+    AUTOMATIC("Auto"),
+    MANUAL("Manual");
+
+    public final String label;
+
+    private NormalizationMode(String label) {
+      this.label = label;
+    }
+
+    @Override
+    public String toString() {
+      return this.label;
+    }
+  }
+
   private File modelFile = null;
 
   public final StringParameter modelName =
@@ -463,6 +135,38 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     new BooleanParameter("Mute", false)
     .setDescription("Send black to all pixels");
 
+  public final EnumParameter<NormalizationMode> normalizationMode =
+    new EnumParameter<NormalizationMode>("Normalization", NormalizationMode.AUTOMATIC)
+    .setDescription("Whether the normalization space is defined by the model or manually");
+
+  public final BoundedParameter normalizationX =
+    new BoundedParameter("X", 0, -LXFixture.POSITION_RANGE, LXFixture.POSITION_RANGE)
+    .setDescription("Manual X position of the normalization center");
+
+  public final BoundedParameter normalizationY =
+    new BoundedParameter("Y", 0, -LXFixture.POSITION_RANGE, LXFixture.POSITION_RANGE)
+    .setDescription("Manual Y position of the normalization center");
+
+  public final BoundedParameter normalizationZ =
+    new BoundedParameter("Z", 0, -LXFixture.POSITION_RANGE, LXFixture.POSITION_RANGE)
+    .setDescription("Manual Z position of the normalization center");
+
+  public final BoundedParameter normalizationWidth =
+    new BoundedParameter("Width", 1000, 0, LXFixture.POSITION_RANGE)
+    .setDescription("With of the normalization space");
+
+  public final BoundedParameter normalizationHeight =
+    new BoundedParameter("Height", 1000, 0, LXFixture.POSITION_RANGE)
+    .setDescription("Height of the normalization space");
+
+  public final BoundedParameter normalizationDepth =
+    new BoundedParameter("Depth", 1000, 0, LXFixture.POSITION_RANGE)
+    .setDescription("Depth of the normalization space");
+
+  public final BooleanParameter showNormalizationBounds =
+    new BooleanParameter("Show Normalization Bounds", false)
+    .setDescription("Outline the normalization bounds in the preview window");
+
   private final List<Listener> listeners = new ArrayList<Listener>();
 
   private final List<LXFixture> mutableFixtures = new ArrayList<LXFixture>();
@@ -474,22 +178,30 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
 
   private LXModel staticModel = null;
 
+  private boolean isDirty = false;
+
   // Whether a single immutable model is used, defined at construction time
   private final boolean isImmutable;
 
-  public final Output output;
+  public final LXStructureOutput output;
 
   public final LXViewEngine views;
 
-  public LXStructure(LX lx) {
-    this(lx, null);
-  }
+  private final LXParameter.Collection normalizationParameters = new LXParameter.Collection();
 
-  public LXStructure(LX lx, LXModel immutable) {
+  public LXStructure(LX lx, LXModel immutable, ModelListener modelListener) {
     super(lx);
     addParameter("syncModelFile", this.syncModelFile);
     addParameter("allWhite", this.allWhite);
     addParameter("mute", this.mute);
+    addNormalizationParameter("normalizationMode", this.normalizationMode);
+    addNormalizationParameter("normalizationX", this.normalizationX);
+    addNormalizationParameter("normalizationY", this.normalizationY);
+    addNormalizationParameter("normalizationZ", this.normalizationZ);
+    addNormalizationParameter("normalizationWidth", this.normalizationWidth);
+    addNormalizationParameter("normalizationHeight", this.normalizationHeight);
+    addNormalizationParameter("normalizationDepth", this.normalizationDepth);
+    addInternalParameter("showNormalizationBounds", this.showNormalizationBounds);
 
     addChild("views", this.views = new LXViewEngine(lx));
 
@@ -502,9 +214,9 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       this.model = new LXModel();
     }
 
-    Output output = null;
+    LXStructureOutput output = null;
     try {
-      output = new Output(lx);
+      output = new LXStructureOutput(lx, this);
     } catch (SocketException sx) {
       lx.pushError(sx,
         "Serious network error, could not create output socket. Program will continue with no network output.\n"
@@ -514,23 +226,41 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
           + sx.getLocalizedMessage());
     }
     this.output = output;
+
+    this.modelListener = modelListener;
   }
 
-  /**
-   * Internal implementation-only helper to set a listener for notification on
-   * changes to the structure's model. This is used by the LX class to relay
-   * model-changes from the structure back to the top-level LX object while
-   * keeping that functionality private on the core LX API.
-   *
-   * @param listener Listener
-   */
-  public void setModelListener(ModelListener listener) {
-    Objects.requireNonNull("LXStructure.setModelListener() cannot be null");
-    if (this.modelListener != null) {
-      throw new IllegalStateException(
-        "Cannot overwrite setModelListener() - should only called once by LX parent object");
+  private void addNormalizationParameter(String path, LXListenableParameter p) {
+    this.normalizationParameters.put(path, p);
+    addParameter(path, p);
+    p.addListener(this::normalizationChanged);
+  }
+
+  private void normalizationChanged(LXParameter p) {
+    if ((p == this.normalizationMode) || (this.normalizationMode.getEnum() == NormalizationMode.MANUAL)) {
+      regenerateModel(false);
     }
-    this.modelListener = listener;
+  }
+
+  private LXNormalizationBounds generateManualNormalizationBounds() {
+    if (this.normalizationMode.getEnum() == NormalizationMode.AUTOMATIC) {
+      return null;
+    }
+
+    final LXNormalizationBounds bounds = new LXNormalizationBounds();
+    bounds.cx = this.normalizationX.getValuef();
+    bounds.cy = this.normalizationY.getValuef();
+    bounds.cz = this.normalizationZ.getValuef();
+    bounds.xRange = this.normalizationWidth.getValuef();
+    bounds.yRange = this.normalizationHeight.getValuef();
+    bounds.zRange = this.normalizationDepth.getValuef();
+    bounds.xMin = bounds.cx - .5f * bounds.xRange;
+    bounds.xMax = bounds.cx + .5f * bounds.xRange;
+    bounds.yMin = bounds.cy - .5f * bounds.yRange;
+    bounds.yMax = bounds.cy + .5f * bounds.yRange;
+    bounds.zMin = bounds.cz - .5f * bounds.zRange;
+    bounds.zMax = bounds.cz + .5f * bounds.zRange;
+    return bounds;
   }
 
   @Override
@@ -712,7 +442,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       for (Listener l : this.listeners) {
         l.fixtureRemoved(fixture);
       }
-      fixture.dispose();
+      LX.dispose(fixture);
     }
     fixtureRemoved();
     return this;
@@ -733,7 +463,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       for (Listener l : this.listeners) {
         l.fixtureRemoved(fixture);
       }
-      fixture.dispose();
+      LX.dispose(fixture);
     }
     fixtureRemoved();
     return this;
@@ -750,7 +480,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     for (Listener l : this.listeners) {
       l.fixtureRemoved(fixture);
     }
-    fixture.dispose();
+    LX.dispose(fixture);
     fixtureRemoved();
     return this;
   }
@@ -765,7 +495,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       for (Listener l : this.listeners) {
         l.fixtureRemoved(fixture);
       }
-      fixture.dispose();
+      LX.dispose(fixture);
     }
 
     fixtureRemoved();
@@ -883,7 +613,6 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
   }
 
   private LXStructure reset(boolean fromSync) {
-    this.views.reset();
     this.staticModel = null;
     removeAllFixtures();
     if (!fromSync) {
@@ -923,7 +652,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       }
     }
 
-    LXModel[] submodels = new LXModel[activeFixtures];
+    final LXModel[] submodels = new LXModel[activeFixtures];
     int pointIndex = 0;
     int fixtureIndex = 0;
     for (LXFixture fixture : this.fixtures) {
@@ -934,11 +663,12 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
         submodels[fixtureIndex++] = fixtureModel;
       }
     }
-    this.model = new LXModel(submodels).normalizePoints();
+
+    this.model = new LXModel(submodels, generateManualNormalizationBounds()).normalizePoints();
     this.modelListener.structureChanged(this.model);
 
-    if ((this.modelFile != null) && !fromLoad) {
-      this.modelName.setValue(this.modelFile.getName() + "*");
+    if (!fromLoad) {
+      setDirty();
     }
   }
 
@@ -968,16 +698,13 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     // We need to re-normalize our model, things have changed
     this.model.update(true, true);
     this.modelListener.structureGenerationChanged(this.model);
-
-    // Denote that file is modified
-    if (this.modelFile != null) {
-      this.modelName.setValue(this.modelFile.getName() + "*");
-    }
+    setDirty();
   }
 
   @Override
   public void fixtureOutputChanged(LXFixture fixture) {
     regenerateOutputs();
+    setDirty();
   }
 
   @Override
@@ -985,10 +712,28 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     regenerateModel(false);
   }
 
+  private void setDirty() {
+    if (this.modelFile != null) {
+      this.modelName.setValue(this.modelFile.getName() + "*");
+    }
+    this.isDirty = true;
+  }
+
+  public boolean isExternalModel() {
+    return
+      !this.isImmutable &&
+      (this.staticModel == null) &&
+      (this.modelFile != null);
+  }
+
+  public boolean isDirty() {
+    return this.isDirty;
+  }
+
   private boolean isLoading = false;
 
   private static final String KEY_FIXTURES = "fixtures";
-  private static final String KEY_VIEWS = "views";
+  private static final String KEY_NORMALIZATION = "normalization";
   private static final String KEY_STATIC_MODEL = "staticModel";
   private static final String KEY_FILE = "file";
 
@@ -1018,12 +763,16 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
   @Override
   public void load(LX lx, JsonObject obj) {
     if (this.isImmutable) {
+      // When the model is immutable, clear/load the views
+      this.views.reset();
+      LXSerializable.Utils.loadObject(this.lx, this.views, obj, this.views.getPath());
       return;
     }
 
     this.isLoading = true;
 
     // Reset everything to complete scratch!
+    this.views.reset();
     reset(false);
 
     // Load parameter values, this is also where views will get loaded
@@ -1087,6 +836,8 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       }
     }
 
+    // Done loading!
+    this.isDirty = false;
   }
 
   private void loadFixtures(LX lx, JsonObject obj) {
@@ -1143,7 +894,9 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       reset(fromSync);
       final JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
       loadFixtures(this.lx, obj);
-      LXSerializable.Utils.loadObject(this.lx, this.views, obj, KEY_VIEWS);
+      if (obj.has(KEY_NORMALIZATION)) {
+        loadParameters(this, obj.get(KEY_NORMALIZATION).getAsJsonObject(), this.normalizationParameters);
+      }
       this.modelFile = file;
       this.modelName.setValue(file.getName());
       this.isStatic.bang();
@@ -1163,6 +916,7 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
       regenerateModel(true);
       regenerateOutputs();
     }
+    this.isDirty = false;
     return this;
   }
 
@@ -1170,21 +924,45 @@ public class LXStructure extends LXComponent implements LXFixtureContainer {
     if (!this.lx.permissions.canSave()) {
       return this;
     }
+
     JsonObject obj = new JsonObject();
     obj.addProperty(LX.KEY_VERSION, LX.VERSION);
     obj.addProperty(LX.KEY_TIMESTAMP, System.currentTimeMillis());
     saveFixtures(this.lx, obj);
-    obj.add(KEY_VIEWS, LXSerializable.Utils.toObject(lx, this.views));
+    obj.add(KEY_NORMALIZATION, LXSerializable.Utils.saveParameters(this.normalizationParameters));
+
     try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
       writer.setIndent("  ");
       new GsonBuilder().create().toJson(obj, writer);
       this.modelFile = file;
       this.modelName.setValue(file.getName());
+      this.isDirty = false;
       this.isStatic.bang();
       LX.log("Model exported successfully to " + file);
     } catch (IOException iox) {
       LX.error(iox, "Exception writing model file to " + file);
     }
+
     return this;
+  }
+
+  public void exportViews(File file) {
+    final JsonObject obj = LXSerializable.Utils.toObject(this.lx, this.views, true);
+    try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
+      writer.setIndent("  ");
+      new GsonBuilder().create().toJson(obj, writer);
+      LX.log("Views saved successfully to " + file.toString());
+    } catch (IOException iox) {
+      LX.error(iox, "Could not export views to file: " + file.toString());
+    }
+  }
+
+  public List<LXViewDefinition> importViews(File file) {
+    try (FileReader fr = new FileReader(file)) {
+      return this.views.addViews(this.lx, new Gson().fromJson(fr, JsonObject.class));
+    } catch (IOException iox) {
+      LX.error(iox, "Could not import views from file: " + file.toString());
+    }
+    return null;
   }
 }

@@ -24,6 +24,7 @@ import java.net.UnknownHostException;
 import heronarts.lx.LX;
 import heronarts.lx.output.ArtNetDatagram;
 import heronarts.lx.output.DDPDatagram;
+import heronarts.lx.output.KinetDatagram;
 import heronarts.lx.output.LXBufferOutput;
 import heronarts.lx.output.LXOutput;
 import heronarts.lx.output.OPCOutput;
@@ -102,6 +103,10 @@ public abstract class LXProtocolFixture extends LXFixture {
     new DiscreteParameter("KiNET Port", 1, 0, 256)
     .setUnits(LXParameter.Units.INTEGER)
     .setDescription("Which KiNET physical output port is used");
+
+  public final EnumParameter<KinetDatagram.Version> kinetVersion =
+    new EnumParameter<KinetDatagram.Version>("KiNET Version", KinetDatagram.Version.PORTOUT)
+    .setDescription("Which KiNET version is used");
 
   public final BooleanParameter reverse =
     new BooleanParameter("Reverse", false)
@@ -187,6 +192,15 @@ public abstract class LXProtocolFixture extends LXFixture {
       return this.artNetSequenceEnabled.isOn();
     default:
       return false;
+    }
+  }
+
+  protected KinetDatagram.Version getProtocolKinetVersion() {
+    switch (this.protocol.getEnum()) {
+    case KINET:
+      return this.kinetVersion.getEnum();
+    default:
+      return KinetDatagram.Version.PORTOUT;
     }
   }
 

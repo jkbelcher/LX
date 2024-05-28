@@ -24,10 +24,14 @@ import heronarts.lx.LX;
 import heronarts.lx.LXComponent;
 import heronarts.lx.LXPath;
 import heronarts.lx.LXSerializable;
+import heronarts.lx.command.LXCommand;
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.DiscreteParameter;
+import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
+import heronarts.lx.utils.LXUtils;
 
 public abstract class LXMidiMapping implements LXSerializable {
 
@@ -40,21 +44,31 @@ public abstract class LXMidiMapping implements LXSerializable {
 
   public final Type type;
 
-  public final LXParameter parameter;
+  public final LXNormalizedParameter parameter;
 
-  private static LXParameter getParameter(LX lx, JsonObject obj) {
+  public final boolean isDiscrete;
+  public final DiscreteParameter discreteParameter;
+
+  public final boolean isBoolean;
+  public final BooleanParameter booleanParameter;
+
+  private static int getChannel(JsonObject obj) {
+    return obj.get(KEY_CHANNEL).getAsInt();
+  }
+
+  private static LXNormalizedParameter getParameter(LX lx, JsonObject obj) {
     if (obj.has(LXComponent.KEY_PATH)) {
       LXPath parameter = LXPath.get(lx, obj.get(LXComponent.KEY_PATH).getAsString());
-      if (parameter instanceof LXParameter) {
-        return (LXParameter) parameter;
+      if (parameter instanceof LXNormalizedParameter) {
+        return (LXNormalizedParameter) parameter;
       }
     }
-    return lx
+    return (LXNormalizedParameter) lx
       .getProjectComponent(obj.get(LXComponent.KEY_COMPONENT_ID).getAsInt())
       .getParameter(obj.get(LXComponent.KEY_PARAMETER_PATH).getAsString());
   }
 
-  protected LXMidiMapping(LX lx, int channel, Type type, LXParameter parameter) {
+  protected LXMidiMapping(LX lx, int channel, Type type, LXNormalizedParameter parameter) {
     if (parameter == null) {
       throw new IllegalArgumentException("Cannot map null parameter");
     }
@@ -64,6 +78,10 @@ public abstract class LXMidiMapping implements LXSerializable {
     this.channel = channel;
     this.type = type;
     this.parameter = parameter;
+    this.isBoolean = parameter instanceof BooleanParameter;
+    this.booleanParameter = this.isBoolean ? (BooleanParameter) parameter : null;
+    this.isDiscrete = parameter instanceof DiscreteParameter;
+    this.discreteParameter = this.isDiscrete ? (DiscreteParameter) parameter : null;
   }
 
   protected LXMidiMapping(LX lx, JsonObject object, Type type) {
@@ -79,7 +97,7 @@ public abstract class LXMidiMapping implements LXSerializable {
     return (message instanceof MidiNote) || (message instanceof MidiControlChange);
   }
 
-  public static LXMidiMapping create(LX lx, LXShortMessage message, LXParameter parameter) {
+  public static LXMidiMapping create(LX lx, LXShortMessage message, LXNormalizedParameter parameter) {
     if (message instanceof MidiNote) {
       return new Note(lx, (MidiNote) message, parameter);
     } else if (message instanceof MidiControlChange) {
@@ -98,36 +116,15 @@ public abstract class LXMidiMapping implements LXSerializable {
   }
 
   abstract boolean matches(LXShortMessage message);
-  abstract void apply(LXShortMessage message);
+  abstract void apply(LX lx, LXShortMessage message);
 
   public abstract String getDescription();
 
   protected void setValue(boolean value) {
     if (this.parameter instanceof BooleanParameter) {
       ((BooleanParameter) this.parameter).setValue(value);
-    } else if (this.parameter instanceof LXNormalizedParameter) {
-      ((LXNormalizedParameter) this.parameter).setNormalized(value ? 1 : 0);
     } else {
-      this.parameter.setValue(value ? 1 : 0);
-    }
-  }
-
-  protected void setNormalized(double normalized) {
-    if (this.parameter instanceof LXNormalizedParameter) {
-      ((LXNormalizedParameter) this.parameter).setNormalized(normalized);
-    } else {
-      this.parameter.setValue(normalized);
-    }
-  }
-
-  protected void toggleValue() {
-    if (this.parameter instanceof BooleanParameter) {
-      ((BooleanParameter) this.parameter).toggle();
-    } else if (this.parameter instanceof LXNormalizedParameter) {
-      LXNormalizedParameter normalized = (LXNormalizedParameter) this.parameter;
-      normalized.setNormalized(normalized.getNormalized() == 0 ? 1 : 0);
-    } else {
-      this.parameter.setValue(this.parameter.getValue() == 0 ? 1 : 0);
+      this.parameter.setNormalized(value ? 1 : 0);
     }
   }
 
@@ -139,6 +136,8 @@ public abstract class LXMidiMapping implements LXSerializable {
     object.addProperty(KEY_CHANNEL, this.channel);
     object.addProperty(KEY_TYPE, this.type.name());
     object.addProperty(LXComponent.KEY_PATH, this.parameter.getCanonicalPath());
+
+    // Path should take precedence, but keeping this around just in case.
     object.addProperty(LXComponent.KEY_COMPONENT_ID, this.parameter.getParent().getId());
     object.addProperty(LXComponent.KEY_PARAMETER_PATH, this.parameter.getPath());
   }
@@ -148,55 +147,224 @@ public abstract class LXMidiMapping implements LXSerializable {
     throw new UnsupportedOperationException("Use LXMidiMapping.create() to load from JsonObject");
   }
 
+  protected static DiscreteParameter makeDiscreteRangeParameter(DiscreteParameter parameter, boolean on, String label, String description) {
+    final int min = parameter.getMinValue();
+    final int max = parameter.getMaxValue();
+
+    return (DiscreteParameter)
+      new DiscreteParameter(label, on ? max : min, min, max+1)
+      .setUnits(parameter.getUnits())
+      .setOptions(parameter.getOptions(), false)
+      .setFormatter(v -> {
+        int index = (int) v - min;
+        String[] options = parameter.getOptions();
+        return (options != null && index < options.length) ? options[index] : parameter.getFormatter().format(v);
+      })
+      .setDescription(description)
+      .setMappable(false);
+  }
+
+  protected static BoundedParameter makeBoundedRangeParameter(LXNormalizedParameter parameter, boolean on, String label, String description) {
+    double v0 = 0, v1 = 1;
+    BoundedParameter.NormalizationCurve normalizationCurve = BoundedParameter.NormalizationCurve.NORMAL;
+    if (parameter instanceof BoundedParameter) {
+      BoundedParameter bounded = (BoundedParameter) parameter;
+      v0 = bounded.range.v0;
+      v1 = bounded.range.v1;
+    }
+    return (BoundedParameter)
+      new BoundedParameter(label, on ? v1 : v0, v0, v1)
+      .setNormalizationCurve(normalizationCurve)
+      .setExponent(parameter.getExponent())
+      .setPolarity(parameter.getPolarity())
+      .setUnits(parameter.getUnits())
+      .setFormatter(parameter.getFormatter())
+      .setDescription(parameter.getDescription())
+      .setMappable(false);
+  }
+
   public static class Note extends LXMidiMapping {
+
+    public enum Mode {
+      TOGGLE("Toggle"),
+      MOMENTARY("Momentary"),
+      ON("On"),
+      OFF("Off");
+
+      public final String label;
+
+      private Mode(String label) {
+        this.label = label;
+      }
+
+      @Override
+      public String toString() {
+        return this.label;
+      }
+
+      public static Mode getDefault(BooleanParameter parameter) {
+        switch (parameter.getMode()) {
+        case MOMENTARY:
+          return MOMENTARY;
+        default:
+        case TOGGLE:
+          return TOGGLE;
+        }
+      }
+    }
+
+    public enum DiscreteMode {
+      INCREMENT("Increment"),
+      DECREMENT("Decrement"),
+      FIXED("Fixed"),
+      RANDOM("Random");
+
+      public final String label;
+
+      private DiscreteMode(String label) {
+        this.label = label;
+      }
+
+      @Override
+      public String toString() {
+        return this.label;
+      }
+    }
 
     public final int pitch;
 
-    private Note(LX lx, MidiNote note, LXParameter parameter) {
-      super(lx, note.getChannel(), Type.NOTE, parameter);
-      this.pitch = note.getPitch();
+    public final EnumParameter<Mode> mode =
+      new EnumParameter<Mode>("Mode", Mode.TOGGLE)
+      .setDescription("How to process note on and off events");
+
+    public final EnumParameter<DiscreteMode> discreteMode =
+      new EnumParameter<DiscreteMode>("Discrete Mode", DiscreteMode.INCREMENT)
+      .setDescription("How to process note events for a parameter with a fixed set of options");
+
+    public final BoundedParameter offValue;
+    public final BoundedParameter onValue;
+
+    public final DiscreteParameter fixedValue;
+
+    private LXParameter.Collection parameters = new LXParameter.Collection();
+
+    private boolean toggleState = false;
+
+    private Note(LX lx, int channel, int pitch, LXNormalizedParameter parameter) {
+      super(lx, channel, Type.NOTE, parameter);
+      this.pitch = pitch;
+      if (this.isDiscrete) {
+        this.fixedValue = makeDiscreteRangeParameter(this.discreteParameter, false, "Fixed", "Value set for a fixed note trigger");
+        this.parameters.add("discreteMode", this.discreteMode);
+        this.parameters.add("fixedValue", this.fixedValue);
+        this.onValue = this.offValue = null;
+      } else if (this.isBoolean) {
+        this.parameters.add("mode", this.mode);
+        this.mode.setValue(Mode.getDefault(this.booleanParameter));
+        this.fixedValue = null;
+        this.onValue = this.offValue = null;
+      } else {
+        this.fixedValue = null;
+        this.offValue = makeBoundedRangeParameter(parameter, false, "Off", "Value when the MIDI note trigger is Off");
+        this.onValue = makeBoundedRangeParameter(parameter, true, "On", "Value when the MIDI note trigger is On");
+        this.parameters.add("mode", this.mode);
+        this.parameters.add("offValue", this.offValue);
+        this.parameters.add("onValue", this.onValue);
+      }
+    }
+
+    private Note(LX lx, MidiNote note, LXNormalizedParameter parameter) {
+      this(lx, note.getChannel(), note.getPitch(), parameter);
     }
 
     private Note(LX lx, JsonObject object) {
-      super(lx, object, Type.NOTE);
-      this.pitch = object.get(KEY_PITCH).getAsInt();
+      this(lx, getChannel(object), object.get(KEY_PITCH).getAsInt(), getParameter(lx, object));
+      LXSerializable.Utils.loadParameters(object, this.parameters);
     }
 
     @Override
     boolean matches(LXShortMessage message) {
-      if (!(message instanceof MidiNote)) {
-        return false;
+      if (message instanceof MidiNote) {
+        final MidiNote note = (MidiNote) message;
+        return
+          (note.getChannel() == this.channel) &&
+          (note.getPitch() == this.pitch);
       }
-      MidiNote note = (MidiNote) message;
-      return
-        (note.getChannel() == this.channel) &&
-        (note.getPitch() == this.pitch);
+      return false;
     }
 
     @Override
-    void apply(LXShortMessage message) {
-      MidiNote note = (MidiNote) message;
-      if ((note instanceof MidiNoteOff) || note.getVelocity() == 0) {
-        if (this.parameter instanceof BooleanParameter) {
-          BooleanParameter booleanParameter = (BooleanParameter) this.parameter;
-          if (booleanParameter.getMode() == BooleanParameter.Mode.MOMENTARY) {
-            booleanParameter.setValue(false);
+    void apply(LX lx, LXShortMessage message) {
+      final MidiNote note = (MidiNote) message;
+      final boolean noteOn = note.isNoteOn();
+
+      if (this.parameter instanceof BooleanParameter) {
+        final BooleanParameter bool = (BooleanParameter) this.parameter;
+        if (noteOn) {
+          switch (this.mode.getEnum()) {
+          case MOMENTARY:
+          case ON:
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(bool, true));
+            break;
+          case OFF:
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(bool, false));
+            break;
+          default:
+          case TOGGLE:
+            lx.command.perform(new LXCommand.Parameter.Toggle(bool));
+            break;
+          }
+        } else if (this.mode.getEnum() == Mode.MOMENTARY) {
+          bool.setValue(false);
+        }
+      } else if (this.parameter instanceof DiscreteParameter) {
+        final DiscreteParameter discrete = ((DiscreteParameter) this.parameter);
+        if (noteOn) {
+          switch (this.discreteMode.getEnum()) {
+          case DECREMENT:
+            lx.command.perform(new LXCommand.Parameter.Decrement(discrete, true));
+            break;
+          case RANDOM:
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(discrete, Math.random()));
+            break;
+          case FIXED:
+            lx.command.perform(new LXCommand.Parameter.SetIndex(discrete, this.fixedValue.getIndex()));
+            break;
+          default:
+          case INCREMENT:
+            lx.command.perform(new LXCommand.Parameter.Increment(discrete, true));
+            break;
           }
         }
       } else {
-        if (this.parameter instanceof DiscreteParameter) {
-          ((DiscreteParameter) this.parameter).increment();
-        } else if (this.parameter instanceof BooleanParameter) {
-          BooleanParameter booleanParameter = (BooleanParameter) this.parameter;
-          if (booleanParameter.getMode() == BooleanParameter.Mode.MOMENTARY) {
-            booleanParameter.setValue(true);
-          } else {
-            booleanParameter.toggle();
+        if (noteOn) {
+          this.toggleState = !this.toggleState;
+        }
+        switch (this.mode.getEnum()) {
+        case MOMENTARY:
+          lx.command.perform(new LXCommand.Parameter.SetNormalized(
+            this.parameter,
+            noteOn ? this.onValue.getValue() : this.offValue.getValue()
+          ));
+          break;
+        case TOGGLE:
+          if (noteOn) {
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(this.parameter, this.toggleState ? this.onValue.getValue() : this.offValue.getValue()));
           }
-        } else {
-          toggleValue();
+          break;
+        case ON:
+          if (noteOn) {
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(this.parameter, this.onValue.getValue()));
+          }
+          break;
+        case OFF:
+          if (noteOn) {
+            lx.command.perform(new LXCommand.Parameter.SetNormalized(this.parameter, this.offValue.getValue()));
+          }
+          break;
         }
       }
+
     }
 
     @Override
@@ -210,6 +378,7 @@ public abstract class LXMidiMapping implements LXSerializable {
     public void save(LX lx, JsonObject object) {
       super.save(lx, object);
       object.addProperty(KEY_PITCH, this.pitch);
+      LXSerializable.Utils.saveParameters(object, this.parameters);
     }
   }
 
@@ -217,31 +386,117 @@ public abstract class LXMidiMapping implements LXSerializable {
 
     public final int cc;
 
-    private ControlChange(LX lx, MidiControlChange controlChange, LXParameter parameter) {
-      super(lx, controlChange.getChannel(), Type.CONTROL_CHANGE, parameter);
-      this.cc = controlChange.getCC();
+    public final DiscreteParameter minDiscrete;
+    public final DiscreteParameter maxDiscrete;
+    public final BoundedParameter minValue;
+    public final BoundedParameter maxValue;
+
+    private LXParameter.Collection parameters = new LXParameter.Collection();
+
+    private ControlChange(LX lx, int channel, int cc, LXNormalizedParameter parameter) {
+      super(lx, channel, Type.CONTROL_CHANGE, parameter);
+      this.cc = cc;
+
+      if (this.isDiscrete) {
+        this.minValue = this.maxValue = null;
+        this.minDiscrete = makeDiscreteRangeParameter(this.discreteParameter, false, "Min", "Minimum mapped value");
+        this.maxDiscrete = makeDiscreteRangeParameter(this.discreteParameter, true, "Max", "Maximum mapped value");
+        this.parameters.add("minDiscrete", this.minDiscrete);
+        this.parameters.add("maxDiscrete", this.maxDiscrete);
+      } else if (this.isBoolean) {
+        this.minDiscrete = this.maxDiscrete = null;
+        this.minValue =
+          new BoundedParameter("Min", .5)
+          .setUnits(BoundedParameter.Units.PERCENT_NORMALIZED)
+          .setDescription("Minimum value for the parameter to be switched on");
+        this.maxValue =
+          new BoundedParameter("Max", 1)
+          .setUnits(BoundedParameter.Units.PERCENT_NORMALIZED)
+          .setDescription("Maximum value for the parameter to be switched on");
+        this.parameters.add("minValue", this.minValue);
+        this.parameters.add("maxValue", this.maxValue);
+      } else {
+        this.minDiscrete = this.maxDiscrete = null;
+        this.minValue = makeBoundedRangeParameter(parameter, false, "Min", "Minimum mapped value");
+        this.maxValue = makeBoundedRangeParameter(parameter, true, "Max", "Maximum mapped value");
+        this.parameters.add("minValue", this.minValue);
+        this.parameters.add("maxValue", this.maxValue);
+      }
+    }
+
+    private ControlChange(LX lx, MidiControlChange controlChange, LXNormalizedParameter parameter) {
+      this(lx, controlChange.getChannel(), controlChange.getCC(), parameter);
     }
 
     private ControlChange(LX lx, JsonObject object) {
-      super(lx, object, Type.CONTROL_CHANGE);
-      this.cc = object.get(KEY_CC).getAsInt();
+      this(lx, getChannel(object), object.get(KEY_CC).getAsInt(), getParameter(lx, object));
+      LXSerializable.Utils.loadParameters(object, this.parameters);
     }
 
     @Override
     boolean matches(LXShortMessage message) {
-      if (!(message instanceof MidiControlChange)) {
-        return false;
+      if (message instanceof MidiControlChange) {
+        final MidiControlChange controlChange = (MidiControlChange) message;
+        return
+          (controlChange.getChannel() == this.channel) &&
+          (controlChange.getCC() == this.cc);
       }
-      MidiControlChange controlChange = (MidiControlChange) message;
-      return
-        (controlChange.getChannel() == this.channel) &&
-        (controlChange.getCC() == this.cc);
+      return false;
+    }
+
+    private long discreteMillis = 0;
+    private long normalizedMillis = 0;
+    private LXCommand.Parameter.SetValue discreteUpdate = null;
+    private LXCommand.Parameter.SetNormalized normalizedUpdate = null;
+
+    private static final long COALSECE_UPDATE_MILLIS = 1000;
+
+    private void setDiscreteCommand(LX lx, int value) {
+      final long elapsedMillis = lx.engine.nowMillis - this.discreteMillis;
+      this.discreteMillis = lx.engine.nowMillis;
+      if ((this.discreteUpdate == null) || (elapsedMillis > COALSECE_UPDATE_MILLIS)) {
+        this.discreteUpdate = new LXCommand.Parameter.SetValue(this.discreteParameter, value);
+      }
+      lx.command.perform(this.discreteUpdate.updateDiscrete(value));
+    }
+
+    private void setNormalizedCommand(LX lx, double normalized) {
+      final long elapsedMillis = lx.engine.nowMillis - this.normalizedMillis;
+      this.normalizedMillis = lx.engine.nowMillis;
+      if ((this.normalizedUpdate == null) || (elapsedMillis > COALSECE_UPDATE_MILLIS)) {
+        this.normalizedUpdate = new LXCommand.Parameter.SetNormalized(this.parameter, normalized);
+      }
+      lx.command.perform(this.normalizedUpdate.update(normalized));
     }
 
     @Override
-    void apply(LXShortMessage message) {
-      MidiControlChange controlChange = (MidiControlChange) message;
-      setNormalized(controlChange.getValue() / 127.);
+    void apply(LX lx, LXShortMessage message) {
+      final MidiControlChange controlChange = (MidiControlChange) message;
+      double normalized = controlChange.getNormalized();
+      if (this.isDiscrete) {
+        int min = this.minDiscrete.getValuei();
+        int max = this.maxDiscrete.getValuei();
+        if (min > max) {
+          int tmp = min;
+          min = max;
+          max = tmp;
+          normalized = 1-normalized;
+        }
+        setDiscreteCommand(lx, LXUtils.min((int) (min + (max - min + 1) * normalized), max));
+      } else if (this.isBoolean) {
+        final boolean isOn =
+          (normalized >= this.minValue.getNormalized()) &&
+          (normalized <= this.maxValue.getNormalized());
+        if (this.booleanParameter.isOn() != isOn) {
+          lx.command.perform(new LXCommand.Parameter.SetNormalized(this.booleanParameter, isOn));
+        }
+      } else {
+        setNormalizedCommand(lx, LXUtils.lerp(
+          this.minValue.getNormalized(),
+          this.maxValue.getNormalized(),
+          normalized
+        ));
+      }
     }
 
     @Override
@@ -255,6 +510,7 @@ public abstract class LXMidiMapping implements LXSerializable {
     public void save(LX lx, JsonObject object) {
       super.save(lx, object);
       object.addProperty(KEY_CC, this.cc);
+      LXSerializable.Utils.saveParameters(object, this.parameters);
     }
   }
 

@@ -29,8 +29,8 @@ import heronarts.lx.LX;
 public class LXView extends LXModel {
 
   public enum Normalization {
-    RELATIVE("Normalize points to view"),
-    ABSOLUTE("Preserve absolute normalization");
+    RELATIVE("Normalize to View"),
+    ABSOLUTE("Preserve Absolute");
 
     public final String description;
 
@@ -46,6 +46,7 @@ public class LXView extends LXModel {
 
   private static final String GROUP_SEPARATOR = "\\s*;\\s*";
   private static final String SELECTOR_SEPARATOR = "\\s*,\\s*";
+  private static final char GROUP_OPERATOR = '*';
 
   private static class ParseState {
 
@@ -61,20 +62,17 @@ public class LXView extends LXModel {
   /**
    * Constructs a view of the given model object
    *
-   * @param model Model
+   * @param model Model Parent model to create view of
    * @param viewSelector View selection string
    * @param normalization What normalization mode to use for this view
    * @return A view of the model that selects the elements in the selector string
    */
-  public static LXView create(LXModel model, String viewSelector, Normalization normalization) {
+  public static LXView create(final LXModel model, String viewSelector, Normalization normalization) {
     ParseState state = new ParseState(model);
 
     // Split at top-level by groups, separated by ;
     for (String groupSelector : viewSelector.trim().split(GROUP_SEPARATOR)) {
-      List<LXModel> group = parseGroup(state, groupSelector);
-      if (group != null) {
-        state.groups.add(group);
-      }
+      parseGroup(state, groupSelector);
     }
 
     // We now have a set of unique submodels, organized by group. Each submodel
@@ -83,9 +81,9 @@ public class LXView extends LXModel {
     // Construct a new list of a copy of all the points from all the models
     // in the view. We need a copy because these will all be re-normalized
     // with xn/yn/zn values relative to this view
-    Map<Integer, LXPoint> clonedPoints = new HashMap<Integer, LXPoint>();
-    LXView[] views = new LXView[state.groups.size()];
-    List<LXPoint> allPoints = new ArrayList<LXPoint>();
+    final Map<Integer, LXPoint> clonedPoints = new HashMap<Integer, LXPoint>();
+    final LXView[] views = new LXView[state.groups.size()];
+    final List<LXPoint> allPoints = new ArrayList<LXPoint>();
     int g = 0;
     for (List<LXModel> group : state.groups) {
       List<LXPoint> groupPoints = new ArrayList<LXPoint>();
@@ -123,22 +121,59 @@ public class LXView extends LXModel {
 
   }
 
-  private static List<LXModel> parseGroup(ParseState state, String groupSelector) {
+  private static void parseGroup(ParseState state, String groupSelector) {
     groupSelector = groupSelector.trim();
     if (groupSelector.isEmpty()) {
-      return null;
+      return;
     }
 
-    // Within a group, multiple CSS-esque selectors are separated by ,
-    // the union of these selectors forms the group
-    List<LXModel> group = new ArrayList<LXModel>();
-    for (String selector : groupSelector.split(SELECTOR_SEPARATOR)) {
-      parseSelector(state, group, selector);
+    final int subgroup = groupSelector.lastIndexOf(GROUP_OPERATOR);
+    if (subgroup >= 0) {
+      final String rootSelector = groupSelector.substring(0, subgroup).replace(GROUP_OPERATOR, ' ').trim();
+      final String subSelector = groupSelector.substring(subgroup+1).trim();
+      final List<LXModel> groupRoots = new ArrayList<LXModel>();
+
+      // Everything to the left of the * symbol specifies a level of grouping, these are
+      // only actually added if there is no sub-selector to the right.
+      final boolean terminal = subSelector.isEmpty();
+      parseGroupSelector(state, state.model, groupRoots, rootSelector, terminal);
+
+      for (LXModel groupRoot : groupRoots) {
+        final List<LXModel> group = new ArrayList<LXModel>();
+        if (terminal) {
+          // If no subselector, then each group root candidate is itself an actual group
+          // that's added directly
+          group.add(groupRoot);
+          state.groups.add(group);
+        } else {
+          // When a subselector is present, parse each potential group root candidate, which
+          // may or may not find anything. This is now a terminal search.
+          parseGroupSelector(state, groupRoot, group, subSelector, true);
+          if (!group.isEmpty()) {
+            state.groups.add(group);
+          }
+        }
+      }
+    } else {
+      // There is no subgrouping in this selector, everything selected will be added, so
+      // terminal is true.
+      final List<LXModel> group = new ArrayList<LXModel>();
+      parseGroupSelector(state, state.model, group, groupSelector, true);
+      if (!group.isEmpty()) {
+        state.groups.add(group);
+      }
     }
-    return group.isEmpty() ? null : group;
   }
 
-  private static void parseSelector(ParseState state, List<LXModel> group, String selector) {
+  private static void parseGroupSelector(ParseState state, LXModel root, List<LXModel> group, String groupSelector, boolean terminal) {
+    // Within a group, multiple CSS-esque selectors are separated by ,
+    // the union of these selectors forms the group
+    for (String selector : groupSelector.split(SELECTOR_SEPARATOR)) {
+      parseSubselector(state, root, group, selector, terminal);
+    }
+  }
+
+  private static void parseSubselector(ParseState state, LXModel root, List<LXModel> group, String selector, boolean terminal) {
     // Is the selector empty? skip it.
     selector = selector.trim();
     if (selector.isEmpty()) {
@@ -147,7 +182,7 @@ public class LXView extends LXModel {
 
     // Set of candidates for addition to this group, by default we have the initial model
     final List<LXModel> candidates = new ArrayList<LXModel>();
-    candidates.add(state.model);
+    candidates.add(root);
 
     final List<LXModel> searchSpace = new ArrayList<LXModel>();
 
@@ -185,36 +220,62 @@ public class LXView extends LXModel {
       candidates.clear();
 
       // If this index selection syntax gets more complex, should clean it up to use regex matching
-      int rangeStart = tag.indexOf('[');
-      int startIndex = 0, endIndex = -1;
-      int increment = 1;
+      int startIndex = 0, endIndex = -1, increment = 1;
+      final int rangeStart = tag.indexOf('[');
+      final int rangeEnd = tag.indexOf(']');
       if (rangeStart >= 0) {
-        tag = selector.substring(0, rangeStart);
-        int rangeEnd = selector.indexOf(']');
         if ((rangeEnd < 0) || (rangeEnd <= rangeStart)) {
-          LX.error("Poorly formatted view selection range: " + selector);
+          LX.error("Poorly formatted view selection range: " + tag);
         } else {
-          // Range can be specified either as [n] or [n-m] (inclusive)
-          String range = selector.substring(rangeStart+1, rangeEnd);
+          // Range can be specified as
+          // - [even] same as 0:2
+          // - [odd] same as 1:2
+          // - [n] fixed index
+          // - [n-m] (inclusive)
+          // - [:i] increment by i
+          // - [n:i] starting at n with increment i
+          // - [n-m:i] inclusive range with increment i
+          String range = tag.substring(rangeStart+1, rangeEnd).trim();
+          tag = tag.substring(0, rangeStart);
+
           if ("even".equals(range)) {
             increment = 2;
           } else if ("odd".equals(range)) {
             startIndex = 1;
             increment = 2;
           } else {
-            int dash = range.indexOf('-');
-            if (dash < 0) {
+            final int colon = range.indexOf(":");
+            final boolean hasIncrement = (colon >= 0);
+            if (hasIncrement) {
+              // It's a increment specified tag[n:i] or tag[n-m:i]
               try {
-                startIndex = endIndex = Integer.parseInt(range.trim());
+                increment = Integer.parseInt(range.substring(colon+1).trim());
+                range = range.substring(0, colon).trim();
               } catch (NumberFormatException nfx) {
-                LX.error("Bad number in view selection range: " + selector);
+                LX.error("Bad number in view selection range: " + tag);
               }
-            } else {
+            }
+            final int dash = range.indexOf('-');
+            if (dash >= 0) {
+              // It's a range tag[n-m]
               try {
                 startIndex = Integer.parseInt(range.substring(0, dash).trim());
                 endIndex = Integer.parseInt(range.substring(dash+1).trim());
               } catch (NumberFormatException nfx) {
-                LX.error("Bad value in view selection range: " + selector);
+                LX.error("Bad number in view selection range: " + tag);
+              }
+            } else {
+              // It's a direct index tag[n]
+              try {
+                if (hasIncrement) {
+                  if (!range.isEmpty()) {
+                    startIndex = Integer.parseInt(range);
+                  }
+                } else {
+                  startIndex = endIndex = Integer.parseInt(range);
+                }
+              } catch (NumberFormatException nfx) {
+                LX.error("Bad number in view selection range: " + tag);
               }
             }
           }
@@ -230,6 +291,9 @@ public class LXView extends LXModel {
           subs = search.children(tag);
         } else {
           subs = search.sub(tag);
+        }
+        if (increment < 1) {
+          increment = 1;
         }
         if (startIndex < 0) {
           startIndex = 0;
@@ -265,8 +329,16 @@ public class LXView extends LXModel {
       andMode = false;
     }
 
-    // Check that candidates are valid/unique, and add to the group
-    addGroupCandidates(state, group, candidates);
+    if (terminal) {
+      // Check that candidates are valid/unique, and add to the group only if they are
+      // not already part of the view by the fact that they belong to a parent that's already
+      // in the view
+      addGroupCandidates(state, group, candidates);
+    } else {
+      // If this is not a terminal selector, then we just add all candidates, they're not going
+      // into the view directly, they'll just be used as roots for a further search.
+      group.addAll(candidates);
+    }
   }
 
   private static void addGroupCandidates(ParseState state, List<LXModel> group, List<LXModel> candidates) {
@@ -327,7 +399,7 @@ public class LXView extends LXModel {
       children[i] = cloneModel(clonedPoints, model.children[i]);
     }
 
-    return new LXModel(points, children, model.metaData, model.tags);
+    return new LXModel(points, children, model.getNormalizationBounds(), model.metaData, model.tags);
   }
 
   private final LXModel model;
@@ -336,15 +408,30 @@ public class LXView extends LXModel {
 
   final Map<Integer, LXPoint> clonedPoints;
 
+  /**
+   * Constructs a view of the given model
+   *
+   * @param model Parent model that view is of
+   * @param normalization Normalization mode
+   * @param clonedPoints Map of points cloned from parent model into this view
+   * @param points Points in this view
+   * @param children Child models
+   */
   private LXView(LXModel model, Normalization normalization, Map<Integer, LXPoint> clonedPoints, List<LXPoint> points, LXModel[] children) {
-    super(points, children, LXModel.Tag.VIEW);
+    super(points, children, (normalization == Normalization.ABSOLUTE) ? model.getNormalizationBounds() : null, LXModel.Tag.VIEW);
     this.model = model;
     this.normalization = normalization;
+
     this.clonedPoints = java.util.Collections.unmodifiableMap(clonedPoints);
     model.derivedViews.add(this);
     if (normalization == Normalization.RELATIVE) {
       normalizePoints();
     }
+  }
+
+  @Override
+  public LXModel getMainRoot() {
+    return this.model.getMainRoot();
   }
 
   @Override

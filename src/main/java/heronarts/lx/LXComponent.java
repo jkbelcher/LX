@@ -18,6 +18,10 @@
 
 package heronarts.lx;
 
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -30,8 +34,13 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.stream.JsonWriter;
+
 import heronarts.lx.color.ColorParameter;
 import heronarts.lx.color.DiscreteColorParameter;
 import heronarts.lx.modulation.LXModulationContainer;
@@ -42,6 +51,7 @@ import heronarts.lx.osc.OscInt;
 import heronarts.lx.osc.OscMessage;
 import heronarts.lx.parameter.AggregateParameter;
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXListenableParameter;
@@ -150,6 +160,10 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   public final BooleanParameter modulationsExpanded =
     new BooleanParameter("Show Modulations", true)
     .setDescription("Whether the modulations are visible");
+
+  public final StringParameter presetFile =
+    new StringParameter("Preset", null)
+    .setDescription("Name of last preset file that has been loaded/saved");
 
   // Prefix for internal implementation-only parameters
   private static final String INTERNAL_PREFIX = "internal/";
@@ -413,6 +427,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
     addInternalParameter("modulationColor", this.modulationColor);
     addInternalParameter("modulationControlsExpanded", this.modulationControlsExpanded);
     addInternalParameter("modulationsExpanded", this.modulationsExpanded);
+    addInternalParameter("presetFile", this.presetFile);
   }
 
   /**
@@ -559,6 +574,18 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
    */
   public String getOscPath() {
     return this.path;
+  }
+
+  /**
+   * Whether a parameter is a valid OSC target, this component must be
+   * an instance of LXOscComponent and the parameters needs to be in the
+   * normal parameters array, e.g. not an internal parameter
+   *
+   * @param parameter Parameter to check
+   * @return If this is a valid OSC parameter
+   */
+  public boolean isValidOscParameter(LXParameter parameter) {
+    return this.parameters.containsKey(parameter.getPath());
   }
 
   /**
@@ -787,20 +814,27 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       obj.addProperty("VALUE", ((StringParameter)parameter).getString());
       obj.addProperty("TYPE", "s");
     } else if (parameter instanceof ColorParameter) {
-      obj.addProperty("VALUE", ((ColorParameter)parameter).getColor());
+      obj.addProperty("VALUE", ((ColorParameter)parameter).getBaseColor());
       obj.addProperty("TYPE", "r");
     } else if (parameter instanceof DiscreteParameter) {
-      obj.addProperty("VALUE", ((DiscreteParameter) parameter).getValuei());
+      obj.addProperty("VALUE", ((DiscreteParameter) parameter).getBaseValuei());
       obj.addProperty("TYPE", "i");
       range = new JsonObject();
       range.addProperty("MIN", ((DiscreteParameter) parameter).getMinValue());
       range.addProperty("MAX", ((DiscreteParameter) parameter).getMaxValue());
-    } else if (parameter instanceof CompoundParameter) {
-      obj.addProperty("VALUE", ((CompoundParameter) parameter).getBaseNormalizedf());
+    } else if (parameter instanceof BoundedParameter) {
+      BoundedParameter boundedParameter = (BoundedParameter) parameter;
       obj.addProperty("TYPE", "f");
       range = new JsonObject();
-      range.addProperty("MIN", 0f);
-      range.addProperty("MAX", 1f);
+      if (boundedParameter.getOscMode() == CompoundParameter.OscMode.ABSOLUTE) {
+        range.addProperty("MIN", (float) boundedParameter.range.min);
+        range.addProperty("MAX", (float) boundedParameter.range.max);
+        obj.addProperty("VALUE", boundedParameter.getBaseValuef());
+      } else {
+        range.addProperty("MIN", 0f);
+        range.addProperty("MAX", 1f);
+        obj.addProperty("VALUE", boundedParameter.getBaseNormalizedf());
+      }
     } else if (parameter instanceof LXNormalizedParameter) {
       obj.addProperty("VALUE", ((LXNormalizedParameter) parameter).getNormalizedf());
       obj.addProperty("TYPE", "f");
@@ -928,6 +962,18 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   private boolean disposed = false;
 
   /**
+   * A checked version of dispose used by internal engine implementation to ensure
+   * that the base class LXComponent.dispose() is always called.
+   *
+   * @param component Component to dispose
+   */
+  public static void assertDisposed(LXComponent component) {
+    if (!component.disposed) {
+      throw new IllegalStateException(component.getClass().getName() + ".dispose() did not complete, is there a missing call to super.dispose()?");
+    }
+  }
+
+  /**
    * Invoked when a component is being removed from the system and will no longer be used at all.
    * This unregisters the component and should free up any resources and parameter listeners.
    * Ideally after this method is called the object should be eligible for garbage collection.
@@ -952,7 +998,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
 
     // Remove the modulation engine for any component that has one
     if ((this != this.lx.engine) && (this instanceof LXModulationContainer)) {
-      ((LXModulationContainer) this).getModulationEngine().dispose();
+      LX.dispose(((LXModulationContainer) this).getModulationEngine());
     }
 
     // Remove modulations from any containers up the chain
@@ -981,14 +1027,14 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   }
 
   // Map of String key to parameter
-  protected final Map<String, LXParameter> parameters = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection parameters = new LXParameter.Collection();
 
   // Map of String key to internal-only parameters
-  protected final Map<String, LXParameter> internalParameters = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection internalParameters = new LXParameter.Collection();
 
-  protected final Map<String, LXParameter> legacyParameters = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection legacyParameters = new LXParameter.Collection();
 
-  protected final Map<String, LXParameter> legacyInternalParameters = new LinkedHashMap<String, LXParameter>();
+  protected final LXParameter.Collection legacyInternalParameters = new LXParameter.Collection();
 
   /**
    * Adds a parameter to this component, using its label as the path by default. This method
@@ -1001,6 +1047,19 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   @Deprecated
   protected final LXComponent addParameter(LXParameter parameter) {
     return addParameter(parameter.getLabel(), parameter);
+  }
+
+  /**
+   * Add all parameters from a collection of parameters
+   *
+   * @param parameters Collection of parameters
+   * @return this
+   */
+  protected final LXComponent addParameters(LXParameter.Collection parameters) {
+    for (Map.Entry<String, LXParameter> entry : parameters.entrySet()) {
+      addParameter(entry.getKey(), entry.getValue());
+    }
+    return this;
   }
 
   /**
@@ -1234,13 +1293,56 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
         ((StringParameter) thisParameter).setValue(((StringParameter) thatParameter).getString());
       } else if (thisParameter instanceof AggregateParameter) {
         // NOTE(mcslee): do nothing! Let the sub-parameters copy over in this instance
-      } else if (thisParameter instanceof CompoundParameter) {
-        thisParameter.setValue(((CompoundParameter) thatParameter).getBaseValue());
       } else {
-        thisParameter.setValue(thatParameter.getValue());
+        thisParameter.setValue(thatParameter.getBaseValue());
       }
     }
     return this;
+  }
+
+  public void loadPreset(File file) {
+    if (!(this instanceof LXPresetComponent)) {
+      throw new IllegalStateException("Cannot load a preset for non-LXPresetComponent: " + getClass().getName());
+    }
+
+    try (FileReader fr = new FileReader(file)) {
+      JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
+      this.lx.componentRegistry.projectLoading = true;
+      this.lx.componentRegistry.setIdCounter(this.lx.getMaxId(obj, this.lx.componentRegistry.getIdCounter()) + 1);
+      load(this.lx, obj);
+      this.lx.componentRegistry.projectLoading = false;
+      this.presetFile.setValue(file.getName());
+      LX.log("Preset loaded successfully from " + file.toString());
+    } catch (IOException iox) {
+      LX.error("Could not load preset file: " + iox.getLocalizedMessage());
+      this.lx.pushError(iox, "Could not load preset file: " + iox.getLocalizedMessage());
+    } catch (Exception x) {
+      LX.error(x, "Exception in loadPreset: " + x.getLocalizedMessage());
+      this.lx.pushError(x, "Exception in loadPreset: " + x.getLocalizedMessage());
+    } finally {
+      this.lx.componentRegistry.projectLoading = false;
+    }
+  }
+
+  public void savePreset(File file) {
+    if (!(this instanceof LXPresetComponent)) {
+      throw new IllegalStateException("Cannot save a preset for non-LXPresetComponent: " + getClass().getName());
+    }
+
+    JsonObject obj = new JsonObject();
+    obj.addProperty(LX.KEY_VERSION, LX.VERSION);
+    obj.addProperty(LX.KEY_TIMESTAMP, System.currentTimeMillis());
+    save(this.lx, obj);
+    ((LXPresetComponent) this).postProcessPreset(this.lx, obj);
+
+    try (JsonWriter writer = new JsonWriter(new FileWriter(file))) {
+      writer.setIndent("  ");
+      new GsonBuilder().create().toJson(obj, writer);
+      this.presetFile.setValue(file.getName());
+      LX.log("Preset saved successfully to " + file.toString());
+    } catch (IOException iox) {
+      LX.error(iox, "Could not write preset to output file: " + file.toString());
+    }
   }
 
   public final static String KEY_ID = "id";
@@ -1253,17 +1355,6 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   public static final String KEY_COMPONENT_ID = "componentId";
   public static final String KEY_PARAMETER_PATH = "parameterPath";
   public static final String KEY_PATH = "path";
-
-  /**
-   * Utility function to serialize a set of parameters
-   *
-   * @param component Component that owns the parameters
-   * @param obj JsonObject to serialize to
-   * @param parameters Map of parameters to serialize
-   */
-  protected static void saveParameters(LXComponent component, JsonObject obj, Map<String, LXParameter> parameters) {
-    LXSerializable.Utils.saveParameters(obj, parameters);
-  }
 
   /**
    * Utility function to load a set of parameters
@@ -1295,19 +1386,11 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
    */
   @Override
   public void save(LX lx, JsonObject obj) {
-    // Serialize parameters
-    JsonObject internal = new JsonObject();
-    saveParameters(this, internal, this.internalParameters);
-    JsonObject parameters = new JsonObject();
-    saveParameters(this, parameters, this.parameters);
-
-    // Serialize children
-    JsonObject children = LXSerializable.Utils.toObject(lx, this.mutableChildren);
     obj.addProperty(KEY_ID, this.id);
     obj.addProperty(KEY_CLASS, getClass().getName());
-    obj.add(KEY_INTERNAL, internal);
-    obj.add(KEY_PARAMETERS, parameters);
-    obj.add(KEY_CHILDREN, children);
+    obj.add(KEY_INTERNAL, LXSerializable.Utils.saveParameters(this.internalParameters));
+    obj.add(KEY_PARAMETERS, LXSerializable.Utils.saveParameters(this.parameters));
+    obj.add(KEY_CHILDREN, LXSerializable.Utils.toObject(lx, this.mutableChildren));
   }
 
   /**

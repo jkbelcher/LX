@@ -21,8 +21,8 @@ package heronarts.lx.parameter;
 import heronarts.lx.LXComponent;
 import heronarts.lx.LXPath;
 import heronarts.lx.midi.MidiNote;
-
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
@@ -31,6 +31,28 @@ import java.util.List;
  * parameters, such as a pattern, effect, or transition.
  */
 public interface LXParameter extends LXPath {
+
+  public static class Collection extends LinkedHashMap<String, LXParameter> {
+    private static final long serialVersionUID = -7473252361485696112L;
+
+    public Collection add(String path, LXParameter parameter) {
+      if (containsKey(path)) {
+        throw new IllegalStateException("Cannot add duplicate parameter path to collection: " + path);
+      }
+      if (containsValue(parameter)) {
+        throw new IllegalStateException("Cannot add parameter to same collection twice: " + parameter);
+      }
+      put(path, parameter);
+      return this;
+    }
+
+    public Collection reset() {
+      for (LXParameter p : values()) {
+        p.reset();
+      }
+      return this;
+    }
+  }
 
   public static class Monitor {
 
@@ -112,6 +134,7 @@ public interface LXParameter extends LXPath {
     CLOCK;
 
     @Override
+    @SuppressWarnings("fallthrough")
     public String format(double value) {
       switch (this) {
       case INTEGER:
@@ -122,7 +145,7 @@ public interface LXParameter extends LXPath {
         return String.format("%d%%", (int) (100*value));
       case SECONDS:
         value *= 1000;
-        //$FALL-THROUGH$
+        // Intentional fall-through
       case MILLISECONDS:
       case MILLISECONDS_RAW:
         if (value < 1000) {
@@ -165,6 +188,7 @@ public interface LXParameter extends LXPath {
       }
     }
 
+    @SuppressWarnings("fallthrough")
     public double parseDouble(String value) throws NumberFormatException {
       double timeMultiple = 1;
       switch (this) {
@@ -176,7 +200,7 @@ public interface LXParameter extends LXPath {
           // in seconds, but always multiplies by 1000 to get the ms equivalent
           timeMultiple = 1000;
         }
-        //$FALL-THROUGH$
+        // Intentional fallthrough
       case SECONDS:
         double raw = 0;
         for (String part : value.split(":")) {
@@ -227,6 +251,14 @@ public interface LXParameter extends LXPath {
   public Formatter getFormatter();
 
   /**
+   * Sets the formatter used for printing this parameter's value
+   *
+   * @param formatter Formatter
+   * @return The parameter
+   */
+  public LXParameter setFormatter(Formatter formatter);
+
+  /**
    * Gets the polarity of this parameter.
    *
    * @return polarity of this parameter
@@ -267,7 +299,29 @@ public interface LXParameter extends LXPath {
    *
    * @return Parameter value as float
    */
-  public float getValuef();
+  public default float getValuef() {
+    return (float) getValue();
+  }
+
+  /**
+   * Get the base parameter value, for modulated parameters
+   * this may differ from getValue()
+   *
+   * @return Base parameter value
+   */
+  public default double getBaseValue() {
+    return getValue();
+  }
+
+  /**
+   * Get the base parameter value, for modulated parameters
+   * this may differ from getValue()
+   *
+   * @return Base parameter value
+   */
+  public default float getBaseValuef() {
+    return (float) getBaseValue();
+  }
 
   /**
    * Gets the label for this parameter
