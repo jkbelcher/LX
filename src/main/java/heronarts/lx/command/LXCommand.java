@@ -831,6 +831,51 @@ public abstract class LXCommand {
       }
     }
 
+    public static class PatternCycle extends LXCommand {
+
+      private final ComponentReference<LXChannel> channel;
+      private final ComponentReference<LXPattern> prevPattern;
+      private ComponentReference<LXPattern> targetPattern;
+
+      public PatternCycle(LXChannel channel) {
+        this.channel = new ComponentReference<LXChannel>(channel);
+        if (channel.isPlaylist() && !channel.isInTransition()) {
+          final LXPattern prev = channel.getActivePattern();
+          this.prevPattern = (prev != null) ? new ComponentReference<LXPattern>(prev) : null;
+        } else {
+          this.prevPattern = null;
+        }
+      }
+
+      @Override
+      public String getDescription() {
+        return "Pattern Cycle";
+      }
+
+      @Override
+      public boolean isIgnored() {
+        return (this.prevPattern == null);
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        final LXChannel channel = this.channel.get();
+        if (this.targetPattern == null) {
+          channel.triggerPatternCycle.trigger();
+          this.targetPattern = new ComponentReference<LXPattern>(channel.getTargetPattern());
+        } else {
+          this.channel.get().goPattern(this.targetPattern.get());
+        }
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        if (this.prevPattern != null) {
+          this.channel.get().goPattern(this.prevPattern.get());
+        }
+      }
+    }
+
     private static ComponentReference<LXComponent> validateEffectParent(LXComponent parent) {
       if (! ((parent instanceof LXBus) || (parent instanceof LXPattern))) {
         throw new IllegalArgumentException("Parent of an LXEffect must be an LXBus or LXPattern");
@@ -911,11 +956,14 @@ public abstract class LXCommand {
 
       @Override
       public String getDescription() {
-        return "Delete Effect";
+        return "Remove Effect";
       }
 
       @Override
       public void perform(LX lx) {
+        if (this.effect.get().locked.isOn()) {
+          throw new IllegalStateException("Locked effects cannot be removed, UI should disallow this");
+        }
         LXComponent parent = this.parent.get();
         if (parent instanceof LXBus) {
           ((LXBus) parent).removeEffect(this.effect.get());

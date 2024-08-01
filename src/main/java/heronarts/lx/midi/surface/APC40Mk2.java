@@ -537,7 +537,9 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
         sendNoteOn(0, DEVICE_ON_OFF, LED_ON(isPatternEnabled(pattern)));
       } else if (this.device instanceof LXEffect) {
         LXEffect effect = (LXEffect) this.device;
-        effect.enabled.toggle();
+        if (!effect.locked.isOn()) {
+          effect.enabled.toggle();
+        }
       }
     }
 
@@ -803,7 +805,6 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
     public void patternEnabled(LXChannel channel, LXPattern pattern) {
       if (gridMode == GridMode.PATTERN) {
         if (channel.isComposite()) {
-          LX.log("Surcae index: " + mixerSurface.getIndex(channel));
           sendChannelPatterns(mixerSurface.getIndex(channel), channel);
         }
       }

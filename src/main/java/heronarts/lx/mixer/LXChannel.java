@@ -180,16 +180,6 @@ public class LXChannel extends LXAbstractChannel {
   private final List<LXPattern> mutablePatterns = new ArrayList<LXPattern>();
   public final List<LXPattern> patterns = Collections.unmodifiableList(mutablePatterns);
 
-  @Deprecated
-  public final MutableParameter controlSurfaceFocusIndex = (MutableParameter)
-    new MutableParameter("SurfaceFocusIndex", 0)
-    .setDescription("Control surface focus index");
-
-  @Deprecated
-  public final MutableParameter controlSurfaceFocusLength = (MutableParameter)
-    new MutableParameter("SurfaceFocusLength", 0)
-    .setDescription("Control surface focus length");
-
   /**
    * A semaphore used to keep count of how many remote control surfaces may be
    * controlling this channel's patterns. This may be used by UI implementations to indicate
@@ -748,6 +738,10 @@ public class LXChannel extends LXAbstractChannel {
 
   public final LXPattern getNextPattern() {
     return (this.nextPatternIndex >= 0) ? this.mutablePatterns.get(this.nextPatternIndex) : null;
+  }
+
+  public boolean isInTransition() {
+    return this.transition != null;
   }
 
   /**
