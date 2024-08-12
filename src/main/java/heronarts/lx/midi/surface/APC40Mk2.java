@@ -486,6 +486,7 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
           sendNoteOn(0, DEVICE_ON_OFF, LED_ON(effect.enabled.isOn()));
         } else if ((pattern != null) && (parameter == pattern.enabled)) {
           sendNoteOn(0, DEVICE_ON_OFF, LED_ON(isPatternEnabled(pattern)));
+           sendChannelPatterns(pattern.getChannel().getIndex(), pattern.getChannel()); // Found in TE repo.  Needed?
         }
         // enabled could be a remote parameter
         for (int i = 0; i < this.knobs.length; ++i) {
