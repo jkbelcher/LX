@@ -1324,6 +1324,24 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
     }
   }
 
+  public void loadPreset(JsonObject obj) {
+    if (!(this instanceof LXPresetComponent)) {
+      throw new IllegalStateException("Cannot load a preset for non-LXPresetComponent: " + getClass().getName());
+    }
+
+    try {
+      this.lx.componentRegistry.projectLoading = true;
+      this.lx.componentRegistry.setIdCounter(this.lx.getMaxId(obj, this.lx.componentRegistry.getIdCounter()) + 1);
+      load(this.lx, obj);
+      this.lx.componentRegistry.projectLoading = false;
+    } catch (Exception x) {
+      LX.error(x, "Exception in loadPreset: " + x.getLocalizedMessage());
+      this.lx.pushError(x, "Exception in loadPreset: " + x.getLocalizedMessage());
+    } finally {
+      this.lx.componentRegistry.projectLoading = false;
+    }
+  }
+
   public void savePreset(File file) {
     if (!(this instanceof LXPresetComponent)) {
       throw new IllegalStateException("Cannot save a preset for non-LXPresetComponent: " + getClass().getName());
