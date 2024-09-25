@@ -1,7 +1,9 @@
 package heronarts.lx.quantize;
 
 import heronarts.lx.LX;
+import heronarts.lx.command.LXCommand;
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.TriggerParameter;
 
 import java.util.LinkedList;
 import java.util.Objects;
@@ -88,7 +90,8 @@ public class QuantizeBooleanParameter extends BooleanParameter implements Quanti
       super.setValue(value);
 
       // If MOMENTARY: latch for at least one cycle, but allow immediate re-latch.
-      if (isMomentary() && super.getValueb()) {
+      // TODO: avoid import of QuantizeTriggerParameter
+      if (isMomentary() && super.getValueb() && !(this instanceof QuantizeTriggerParameter)) {
         break;
       }
     }
