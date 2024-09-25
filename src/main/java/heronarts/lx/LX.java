@@ -32,6 +32,7 @@ import heronarts.lx.parameter.MutableParameter;
 import heronarts.lx.parameter.StringParameter;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.pattern.color.SolidPattern;
+import heronarts.lx.quantize.QuantizeEngine;
 import heronarts.lx.scheduler.LXScheduler;
 import heronarts.lx.structure.LXFixture;
 import heronarts.lx.structure.LXStructure;
@@ -413,6 +414,8 @@ public class LX {
    */
   public final LXCommandEngine command;
 
+  public final QuantizeEngine quantize;
+
   /**
    * Registry for classes
    */
@@ -465,6 +468,10 @@ public class LX {
       this.model = model;
     }
     LX.initProfiler.log("Model");
+
+    // Quantize engine
+    this.quantize = new QuantizeEngine(this);
+    LX.initProfiler.log("Engine: Quantize");
 
     // Custom content loader
     this.registry = instantiateRegistry(this);

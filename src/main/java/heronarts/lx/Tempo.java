@@ -34,6 +34,8 @@ import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.MutableParameter;
 import heronarts.lx.parameter.TriggerParameter;
+import heronarts.lx.utils.ListenerCollection;
+import heronarts.lx.quantize.QuantizeSource;
 import heronarts.lx.utils.LXUtils;
 
 /**
@@ -277,6 +279,8 @@ public class Tempo extends LXModulatorComponent implements LXOscComponent, LXTri
     addModulator("nudge", this.nudge);
 
     addLegacyParameter("beatsPerMeasure", this.beatsPerBar);
+
+    initializeQuantizeSources(lx);
   }
 
   private static final String PATH_BEAT = "beat";
@@ -915,11 +919,66 @@ public class Tempo extends LXModulatorComponent implements LXOscComponent, LXTri
         this.trigger.trigger();
       }
     }
+
+    // Update Tempo QuantizeSources
+    for (TempoQuantizeSource quantizeSource : quantizeSources) {
+      quantizeSource.loop();
+    }
   }
 
   @Override
   public BooleanParameter getTriggerSource() {
     return this.trigger;
+  }
+
+  private final List<TempoQuantizeSource> quantizeSources = new ArrayList<TempoQuantizeSource>();
+
+  private void initializeQuantizeSources(LX lx) {
+    for (Division division : Division.values()) {
+      TempoQuantizeSource source = new TempoQuantizeSource(division);
+      this.quantizeSources.add(source);
+      lx.quantize.addSource(source);
+    }
+  }
+
+  public class TempoQuantizeSource implements QuantizeSource {
+
+    public final Division division;
+    private int priorCycleCount = 0;
+
+    public TempoQuantizeSource(Division division) {
+      this.division = division;
+    }
+
+    private final ListenerCollection<Listener> listeners = new ListenerCollection<>();
+
+    @Override
+    public QuantizeSource addListener(Listener listener) {
+      this.listeners.add(listener);
+      return this;
+    }
+
+    @Override
+    public QuantizeSource removeListener(Listener listener) {
+      this.listeners.remove(listener);
+      return this;
+    }
+
+    @Override
+    public String getLabel() {
+      return division.label;
+    }
+
+    private void loop() {
+      // Needs review
+      int cycleCount = getCycleCount(this.division);
+      if (cycleCount > this.priorCycleCount) {
+        for (Listener listener : this.listeners) {
+          listener.onEvent(this);
+        }
+      }
+      this.priorCycleCount = cycleCount;
+    }
   }
 
 }

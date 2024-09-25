@@ -40,6 +40,7 @@ import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.pattern.LXPattern;
+import heronarts.lx.quantize.QuantizeEngine;
 import heronarts.lx.snapshot.LXSnapshotEngine;
 import heronarts.lx.structure.LXFixture;
 
