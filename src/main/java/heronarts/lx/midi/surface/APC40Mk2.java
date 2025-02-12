@@ -51,9 +51,9 @@ import heronarts.lx.parameter.LXParameterListener;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.utils.LXUtils;
 
+@LXMidiSurface.Name("Akai APC40 mkII")
+@LXMidiSurface.DeviceName("APC40 mkII")
 public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirectional {
-
-  public static final String DEVICE_NAME = "APC40 mkII";
 
   public static final byte GENERIC_MODE = 0x40;
   public static final byte ABLETON_MODE = 0x41;
@@ -917,17 +917,15 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
 
   @Override
   protected void onReconnect() {
-    if (this.enabled.isOn()) {
-      setApcMode(ABLETON_ALTERNATE_MODE);
-      initialize(true);
-      if (isDeviceControl()) {
-        this.deviceListener.resend();
-      }
+    setApcMode(ABLETON_ALTERNATE_MODE);
+    initialize(true);
+    if (isDeviceControl()) {
+      this.deviceListener.resend();
     }
   }
 
   private void setApcMode(byte mode) {
-    this.output.sendSysex(new byte[] {
+    sendSysex(new byte[] {
       (byte) 0xf0, // sysex start
       0x47, // manufacturers id
       0x00, // device id
@@ -944,8 +942,8 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
   }
 
   private void initialize(boolean reconnect) {
-    this.output.sendNoteOn(0, BANK, LED_ON(this.bankOn));
-    this.output.sendNoteOn(0, DEVICE_LOCK, LED_ON(this.deviceLockOn));
+    sendNoteOn(0, BANK, LED_ON(this.bankOn));
+    sendNoteOn(0, DEVICE_LOCK, LED_ON(this.deviceLockOn));
 
     if (!reconnect) {
       resetPaletteVars();
@@ -1612,7 +1610,7 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
               this.lx.engine.mixer.selectChannel(lx.engine.mixer.masterBus);
             }
           } else {
-            this.lx.engine.clips.launchPatternCycle();
+            this.lx.engine.clips.triggerPatternCycle();
           }
         }
         return;
@@ -1640,9 +1638,9 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
             sendSwatch(MASTER_SWATCH);
           }
         } else if (this.gridMode == GridMode.PATTERN) {
-          this.lx.engine.clips.launchPatternScene(index + this.mixerSurface.getGridPatternOffset());
+          this.lx.engine.clips.triggerPatternScene(index + this.mixerSurface.getGridPatternOffset());
         } else if (this.gridMode == GridMode.CLIP) {
-          this.lx.engine.clips.launchScene(index + this.mixerSurface.getGridClipOffset());
+          this.lx.engine.clips.triggerScene(index + this.mixerSurface.getGridClipOffset());
         }
         return;
       }
@@ -1976,6 +1974,7 @@ public class APC40Mk2 extends LXMidiSurface implements LXMidiSurface.Bidirection
       fader.dispose();
     }
     this.deviceListener.dispose();
+    this.mixerSurface.dispose();
     super.dispose();
   }
 

@@ -800,7 +800,7 @@ public abstract class APCminiSurface extends LXMidiSurface implements LXMidiSurf
   @Override
   protected void onEnable(boolean on) {
     if (on) {
-      initialize(false);
+      initialize();
       register();
     } else {
       if (this.isRegistered) {
@@ -811,13 +811,11 @@ public abstract class APCminiSurface extends LXMidiSurface implements LXMidiSurf
 
   @Override
   protected void onReconnect() {
-    if (this.enabled.isOn()) {
-      initialize(true);
-      this.deviceListener.resend();
-    }
+    initialize();
+    this.deviceListener.resend();
   }
 
-  private void initialize(boolean reconnect) {
+  private void initialize() {
     sendGrid();
     sendChannelButtonRow();
     sendSceneLaunchButtons();
@@ -1217,7 +1215,7 @@ public abstract class APCminiSurface extends LXMidiSurface implements LXMidiSurf
         } else if (pitch == NOTE.STOP_ALL_CLIPS) {
           // Global stop/trigger action
           if (isGridModePatterns()) {
-            this.lx.engine.clips.launchPatternCycle();
+            this.lx.engine.clips.triggerPatternCycle();
           } else if (isGridModeClips()) {
             this.lx.engine.clips.stopClips();
           }
@@ -1227,9 +1225,9 @@ public abstract class APCminiSurface extends LXMidiSurface implements LXMidiSurf
       // Global momentary mode
       sendNoteOn(MIDI_CHANNEL_SINGLE, pitch, LED_ON(on));
       if (isGridModeClips()) {
-        this.lx.engine.clips.launchScene(pitch - NOTE.SCENE_LAUNCH + this.mixerSurface.getGridClipOffset());
+        this.lx.engine.clips.triggerScene(pitch - NOTE.SCENE_LAUNCH + this.mixerSurface.getGridClipOffset());
       } else if (isGridModePatterns()) {
-        this.lx.engine.clips.launchPatternScene(pitch - NOTE.SCENE_LAUNCH + this.mixerSurface.getGridPatternOffset());
+        this.lx.engine.clips.triggerPatternScene(pitch - NOTE.SCENE_LAUNCH + this.mixerSurface.getGridPatternOffset());
       }
     }
   }

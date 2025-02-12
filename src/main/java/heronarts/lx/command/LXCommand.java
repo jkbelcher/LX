@@ -41,6 +41,7 @@ import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXMidiEngine;
 import heronarts.lx.midi.LXMidiMapping;
 import heronarts.lx.midi.LXShortMessage;
+import heronarts.lx.midi.template.LXMidiTemplate;
 import heronarts.lx.mixer.LXBus;
 import heronarts.lx.mixer.LXChannel;
 import heronarts.lx.mixer.LXAbstractChannel;
@@ -51,6 +52,7 @@ import heronarts.lx.modulation.LXModulationEngine;
 import heronarts.lx.modulation.LXParameterModulation;
 import heronarts.lx.modulation.LXTriggerModulation;
 import heronarts.lx.modulator.LXModulator;
+import heronarts.lx.osc.LXOscConnection;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXListenableNormalizedParameter;
@@ -1717,13 +1719,14 @@ public abstract class LXCommand {
 
     }
 
-    public static class RemoveModulation extends LXCommand {
+    public static class RemoveModulation extends RemoveComponent {
 
       private final ComponentReference<LXModulationEngine> engine;
       private ComponentReference<LXCompoundModulation> modulation;
       private final JsonObject modulationObj;
 
       public RemoveModulation(LXModulationEngine engine, LXCompoundModulation modulation) {
+        super(modulation);
         this.engine = new ComponentReference<LXModulationEngine>(engine);
         this.modulation = new ComponentReference<LXCompoundModulation>(modulation);
         this.modulationObj = LXSerializable.Utils.toObject(modulation);
@@ -1746,6 +1749,7 @@ public abstract class LXCommand {
           this.engine.get().addModulation(modulation);
           modulation.load(lx, this.modulationObj);
           this.modulation = new ComponentReference<LXCompoundModulation>(modulation);
+          super.undo(lx);
         } catch (LXParameterModulation.ModulationException mx) {
           throw new InvalidCommandException(mx);
         }
@@ -1819,13 +1823,14 @@ public abstract class LXCommand {
 
     }
 
-    public static class RemoveTrigger extends LXCommand {
+    public static class RemoveTrigger extends RemoveComponent {
 
       private final ComponentReference<LXModulationEngine> engine;
       private ComponentReference<LXTriggerModulation> trigger;
       private final JsonObject triggerObj;
 
       public RemoveTrigger(LXModulationEngine engine, LXTriggerModulation trigger) {
+        super(trigger);
         this.engine = new ComponentReference<LXModulationEngine>(engine);
         this.trigger = new ComponentReference<LXTriggerModulation>(trigger);
         this.triggerObj = LXSerializable.Utils.toObject(trigger);
@@ -1848,6 +1853,7 @@ public abstract class LXCommand {
           this.engine.get().addTrigger(trigger);
           trigger.load(lx, this.triggerObj);
           this.trigger = new ComponentReference<LXTriggerModulation>(trigger);
+          super.undo(lx);
         } catch (LXParameterModulation.ModulationException mx) {
           throw new InvalidCommandException(mx);
         }
@@ -2016,7 +2022,6 @@ public abstract class LXCommand {
       @Override
       public void perform(LX lx) throws InvalidCommandException {
         lx.engine.palette.removeSwatch(this.swatch.get());
-
       }
 
       @Override
@@ -2834,19 +2839,19 @@ public abstract class LXCommand {
 
     }
 
-    public static class Trigger extends LXCommand {
+    public static class Launch extends LXCommand {
 
       private final ComponentReference<LXClip> clip;
       private final List<LXCommand> commands = new ArrayList<LXCommand>();
       private boolean ignore = false;
 
-      public Trigger(LXClip clip) {
+      public Launch(LXClip clip) {
         this.clip = new ComponentReference<LXClip>(clip);
       }
 
       @Override
       public String getDescription() {
-        return "Trigger Clip";
+        return "Launch Clip";
       }
 
       @Override
@@ -2858,7 +2863,7 @@ public abstract class LXCommand {
         if (!this.ignore) {
           clip.snapshot.getCommands(this.commands);
         }
-        clip.trigger();
+        clip.launch();
       }
 
       @Override
@@ -2909,6 +2914,109 @@ public abstract class LXCommand {
     }
   }
 
+  public static class Osc {
+
+    public static class AddInput extends LXCommand {
+
+      private LXOscConnection.Input input;
+
+      public AddInput() {}
+
+      @Override
+      public String getDescription() {
+        return "Add OSC input";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        this.input = lx.engine.osc.addInput();
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.engine.osc.removeInput(this.input);
+      }
+    }
+
+    public static class RemoveInput extends RemoveComponent {
+
+      private final ComponentReference<LXOscConnection.Input> input;
+      private final JsonObject inputObj;
+
+      public RemoveInput(LXOscConnection.Input input) {
+        super(input);
+        this.input = new ComponentReference<LXOscConnection.Input>(input);
+        this.inputObj = LXSerializable.Utils.toObject(input);
+      }
+
+      @Override
+      public String getDescription() {
+        return "Delete OSC input";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        lx.engine.osc.removeInput(this.input.get());
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.engine.osc.addInput(this.inputObj, -1);
+        super.undo(lx);
+      }
+    }
+
+    public static class AddOutput extends LXCommand {
+
+      private LXOscConnection.Output output;
+
+      public AddOutput() {}
+
+      @Override
+      public String getDescription() {
+        return "Add OSC output";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        this.output = lx.engine.osc.addOutput();
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.engine.osc.removeOutput(this.output);
+      }
+    }
+
+    public static class RemoveOutput extends RemoveComponent {
+
+      private final ComponentReference<LXOscConnection.Output> output;
+      private final JsonObject outputObj;
+
+      public RemoveOutput(LXOscConnection.Output output) {
+        super(output);
+        this.output = new ComponentReference<LXOscConnection.Output>(output);
+        this.outputObj = LXSerializable.Utils.toObject(output);
+      }
+
+      @Override
+      public String getDescription() {
+        return "Delete OSC output";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        lx.engine.osc.removeOutput(this.output.get());
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.engine.osc.addOutput(this.outputObj, -1);
+        super.undo(lx);
+      }
+    }
+  }
+
   public static class Midi {
 
     public static class AddMapping extends LXCommand {
@@ -2940,7 +3048,7 @@ public abstract class LXCommand {
     }
 
     public static class RemoveMapping extends LXCommand {
-      private final LXMidiMapping mapping;
+      private LXMidiMapping mapping;
       private final JsonObject mappingObj;
 
       public RemoveMapping(LX lx, LXMidiMapping mapping) {
@@ -2960,8 +3068,118 @@ public abstract class LXCommand {
 
       @Override
       public void undo(LX lx) throws InvalidCommandException {
-        lx.engine.midi.addMapping(LXMidiMapping.create(lx, this.mappingObj));
+        lx.engine.midi.addMapping(this.mapping = LXMidiMapping.create(lx, this.mappingObj));
       }
+    }
+
+    public static class AddTemplate extends LXCommand {
+
+      private ComponentReference<LXMidiTemplate> template = null;
+      private final Class<? extends LXMidiTemplate> templateClass;
+      private JsonObject templateObj = null;
+
+      public AddTemplate(Class<? extends LXMidiTemplate> templateClass) {
+        this.templateClass = templateClass;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Add MIDI Template";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        try {
+          final LXMidiTemplate template = lx.instantiateComponent(this.templateClass, LXMidiTemplate.class);
+          this.template = new ComponentReference<LXMidiTemplate>(template);
+          if (this.templateObj != null) {
+            template.load(lx, this.templateObj);
+          } else {
+            template.initializeDefaultIO();
+          }
+          lx.engine.midi.addTemplate(template);
+        } catch (LX.InstantiationException x) {
+          throw new InvalidCommandException(x);
+        }
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        if (this.template == null) {
+          throw new IllegalStateException("Template was not successfully added, cannot undo");
+        }
+        final LXMidiTemplate template = this.template.get();
+        this.templateObj = LXSerializable.Utils.toObject(template);
+        lx.engine.midi.removeTemplate(template);
+      }
+
+    }
+
+    public static class RemoveTemplate extends RemoveComponent {
+
+      private final ComponentReference<LXMidiTemplate> midiTemplate;
+      private JsonObject templateObj;
+      private int fromIndex;
+
+      public RemoveTemplate(LXMidiTemplate midiTemplate) {
+        super(midiTemplate);
+        this.midiTemplate = new ComponentReference<LXMidiTemplate>(midiTemplate);
+      }
+
+      @Override
+      public String getDescription() {
+        return "Delete MIDI Template";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        final LXMidiTemplate midiTemplate = this.midiTemplate.get();
+        this.fromIndex = midiTemplate.getIndex();
+        this.templateObj = LXSerializable.Utils.toObject(midiTemplate);
+        lx.engine.midi.removeTemplate(midiTemplate);
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        try {
+          final LXMidiTemplate template = lx.instantiateComponent(this.templateObj.get(LXComponent.KEY_CLASS).getAsString(), LXMidiTemplate.class);
+          template.load(lx, this.templateObj);
+          lx.engine.midi.addTemplate(template);
+          lx.engine.midi.moveTemplate(template, this.fromIndex);
+          super.undo(lx);
+        } catch (LX.InstantiationException x) {
+          throw new InvalidCommandException(x);
+        }
+      }
+    }
+
+    public static class MoveTemplate extends LXCommand {
+
+      private final ComponentReference<LXMidiTemplate> midiTemplate;
+      private final int fromIndex;
+      private final int toIndex;
+
+      public MoveTemplate(LXMidiTemplate midiTemplate, int toIndex) {
+        this.midiTemplate = new ComponentReference<LXMidiTemplate>(midiTemplate);
+        this.fromIndex = midiTemplate.getIndex();
+        this.toIndex = toIndex;
+      }
+
+      @Override
+      public String getDescription() {
+        return "Move MIDI Template";
+      }
+
+      @Override
+      public void perform(LX lx) throws InvalidCommandException {
+        lx.engine.midi.moveTemplate(this.midiTemplate.get(), this.toIndex);
+      }
+
+      @Override
+      public void undo(LX lx) throws InvalidCommandException {
+        lx.engine.midi.moveTemplate(this.midiTemplate.get(), this.fromIndex);
+      }
+
     }
   }
 }

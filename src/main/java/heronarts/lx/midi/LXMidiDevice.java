@@ -21,7 +21,7 @@ package heronarts.lx.midi;
 import javax.sound.midi.MidiDevice;
 import heronarts.lx.parameter.BooleanParameter;
 
-public abstract class LXMidiDevice {
+public abstract class LXMidiDevice implements LXMidiTerminal {
 
   protected final LXMidiEngine engine;
   protected MidiDevice device;
@@ -105,6 +105,11 @@ public abstract class LXMidiDevice {
     return LXMidiEngine.getDeviceName(this.device.getDeviceInfo());
   }
 
+  @Override
+  public String toString() {
+    return getName();
+  }
+
   /**
    * Get a description of this device
    *
@@ -128,9 +133,10 @@ public abstract class LXMidiDevice {
       if (this.device.isOpen()) {
         this.device.close();
       }
-    } catch (Exception ignored) {
+    } catch (Exception x) {
       // Technically should never happen, but just to beware of weird
       // MIDI implementations on strange systems
+      LXMidiEngine.error(x, "Unexpected exception closing device " + getName());
     }
   }
 

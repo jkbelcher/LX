@@ -77,6 +77,17 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   }
 
   /**
+   * An annotation which provides a user-friendly description of the function
+   * of the component, which may be shown in a UI tool tip
+   */
+  @Documented
+  @Target(ElementType.TYPE)
+  @Retention(RetentionPolicy.RUNTIME)
+  public @interface Description {
+    String value();
+  }
+
+  /**
    * Marker interface for components which can have their label changed. Any LXComponent
    * class that has a user-editable label in the UI must have this marker interface
    * attached to it for those edits to be saved and loaded.
@@ -149,7 +160,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
    * A color used to identify this component when it or one of its parameters
    * is used as a modulation source.
    */
-  public final DiscreteColorParameter modulationColor = (DiscreteColorParameter)
+  public final DiscreteColorParameter modulationColor =
     new DiscreteColorParameter("Modulation Color")
     .setDescription("The color used to indicate this modulation source");
 
@@ -351,6 +362,21 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       generic = generic.getSuperclass().asSubclass(LXComponent.class);
     }
     return getComponentName(cls, suffix);
+  }
+
+  /**
+   * Gets the description for a component class, if one is available and provided
+   * by the description annotation
+   *
+   * @param cls Component class
+   * @return Description of component class
+   */
+  public static String getComponentDescription(Class<? extends LXComponent> cls) {
+    Description description = cls.getAnnotation(Description.class);
+    if (description != null) {
+      return description.value();
+    }
+    return null;
   }
 
   /**
@@ -690,7 +716,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
           LXOscEngine.error("Component " + this + " did not find anything at OSC path: " + path + " (" + message + ")");
           return false;
         }
-      } else {
+      } else if (parameter instanceof ColorParameter) {
         ((ColorParameter) parameter).setColor(message.getInt());
       }
     } else if (parameter instanceof DiscreteParameter) {

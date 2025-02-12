@@ -30,6 +30,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+
 import heronarts.lx.midi.LXMidiListener;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.midi.MidiFilterParameter;
@@ -126,7 +127,7 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
    * controlling this component. This may be used by UI implementations to indicate
    * to the user that this component is under remote control.
    */
-  public final MutableParameter controlSurfaceSemaphore = (MutableParameter)
+  public final MutableParameter controlSurfaceSemaphore =
     new MutableParameter("Control-Surfaces", 0)
     .setDescription("How many control surfaces are controlling this component");
 
@@ -160,6 +161,17 @@ public abstract class LXDeviceComponent extends LXLayeredComponent implements LX
     this.viewPriority.addListener(this.viewPriorityListener = p -> {
       this.view.setValue(this.viewPriority.getObject());
     });
+
+    setDescription(getDeviceDescription(getClass()));
+  }
+
+  public static String getDeviceDescription(Class<? extends LXDeviceComponent> cls) {
+    String name = LXComponent.getComponentName(cls);
+    String description = LXComponent.getComponentDescription(cls);
+    if (description != null) {
+      return  name + ": " + description;
+    }
+    return name;
   }
 
   public LXModel getModelView() {

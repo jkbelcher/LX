@@ -35,8 +35,9 @@ import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.EnumParameter;
 import heronarts.lx.parameter.LXParameter;
+import heronarts.lx.parameter.LXParameterListener;
 import heronarts.lx.parameter.MutableParameter;
-import heronarts.lx.parameter.TriggerParameter;
+import heronarts.lx.parameter.QuantizedTriggerParameter;
 import heronarts.lx.utils.LXUtils;
 
 public class LXClipEngine extends LXComponent implements LXOscComponent {
@@ -82,9 +83,9 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
   public static final int MIN_SCENES = 8;
   public static final int MAX_SCENES = 128;
 
-  private final TriggerParameter[] scenes = new TriggerParameter[MAX_SCENES];
+  private final QuantizedTriggerParameter[] scenes = new QuantizedTriggerParameter[MAX_SCENES];
 
-  private final TriggerParameter[] patternScenes = new TriggerParameter[MAX_SCENES];
+  private final QuantizedTriggerParameter[] patternScenes = new QuantizedTriggerParameter[MAX_SCENES];
 
   public final FocusedClipParameter focusedClip = new FocusedClipParameter();
 
@@ -116,12 +117,12 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
     new DiscreteParameter("Num Patterns", MIN_SCENES, 4097)
     .setDescription("Number of active patterns");
 
-  public final TriggerParameter stopClips =
-    new TriggerParameter("Stop Clips", this::stopClips)
+  public final QuantizedTriggerParameter stopClips =
+    new QuantizedTriggerParameter(lx, "Stop Clips", this::stopClips)
     .setDescription("Stops all clips running in the whole project");
 
-  public final TriggerParameter triggerPatternCycle =
-    new TriggerParameter("Trigger Pattern Cycle", this::launchPatternCycle)
+  public final QuantizedTriggerParameter launchPatternCycle =
+    new QuantizedTriggerParameter(lx, "Launch Pattern Cycle", this::triggerPatternCycle)
     .setDescription("Triggers a pattern cycle on every eligble channel");
 
   /**
@@ -141,7 +142,7 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
    * controlling this component. This may be used by UI implementations to indicate
    * to the user that this component is under remote control.
    */
-  public final MutableParameter controlSurfaceSemaphore = (MutableParameter)
+  public final MutableParameter controlSurfaceSemaphore =
     new MutableParameter("Control-Surfaces", 0)
     .setDescription("How many control surfaces are controlling this component");
 
@@ -149,32 +150,68 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
   private final CopyOnWriteArraySet<MixerSurface> controlSurfaces =
     new CopyOnWriteArraySet<MixerSurface>();
 
+  private final LXParameterListener clipSceneListener = this::onLaunchClipScene;
+  private final LXParameterListener patternSceneListener = this::onLaunchPatternScene;
+
   public LXClipEngine(LX lx) {
-    super(lx);
+    super(lx, "Clips");
     addParameter("focusedClip", this.focusedClip);
     addParameter("numScenes", this.numScenes);
     addParameter("snapshotTransitionEnabled", this.snapshotTransitionEnabled);
     addParameter("snapshotTransitionTimeSecs", this.snapshotTransitionTimeSecs);
     addParameter("stopClips", this.stopClips);
-    addParameter("triggerPatternCycle", this.triggerPatternCycle);
+    addParameter("triggerPatternCycle", this.launchPatternCycle);
     addParameter("gridMode", this.gridMode);
     addParameter("gridViewOffset", this.gridViewOffset);
     addParameter("gridPatternOffset", this.gridPatternOffset);
     addParameter("gridViewExpanded", this.gridViewExpanded);
     addParameter("clipInspectorExpanded", this.clipInspectorExpanded);
 
+    this.launchPatternCycle.addListener(this.patternSceneListener);
+    this.stopClips.addListener(this.clipSceneListener);
+
     // Scenes
     for (int i = 0; i < this.scenes.length; ++i) {
       final int sceneIndex = i;
       this.scenes[i] =
-        new TriggerParameter("Scene-" + (i+1), () -> { launchScene(sceneIndex); })
+        new QuantizedTriggerParameter(lx, "Launch Scene-" + (i+1), () -> { triggerScene(sceneIndex); })
         .setDescription("Launches scene " + (i+1));
+      this.scenes[i].addListener(this.clipSceneListener);
       addParameter("scene-" + (i+1), this.scenes[i]);
 
       this.patternScenes[i] =
-        new TriggerParameter("Pattern-" + (i+1), () -> { launchPatternScene(sceneIndex); })
-        .setDescription("Triggers all patterns at index " + (i+1));
+        new QuantizedTriggerParameter(lx, "Launch Pattern-" + (i+1), () -> { triggerPatternScene(sceneIndex); })
+        .setDescription("Launches all patterns at index " + (i+1));
+      this.patternScenes[i].addListener(this.patternSceneListener);
       addParameter("pattern-" + (i+1), this.patternScenes[i]);
+    }
+  }
+
+  // Ensure that two clip scenes can't be pending at once
+  private void onLaunchClipScene(LXParameter p) {
+    if (p.getValue() > 0) {
+      for (QuantizedTriggerParameter scene : this.scenes) {
+        if (p != scene) {
+          scene.cancel();
+        }
+      }
+    }
+    if (p != this.stopClips) {
+      this.stopClips.cancel();
+    }
+  }
+
+  // Ensure that two pattern scenes can't be pending at once
+  private void onLaunchPatternScene(LXParameter p) {
+    if (p.getValue() > 0) {
+      for (QuantizedTriggerParameter pattern : this.patternScenes) {
+        if (p != pattern) {
+          pattern.cancel();
+        }
+      }
+      if (p != this.launchPatternCycle) {
+        this.launchPatternCycle.cancel();
+      }
     }
   }
 
@@ -261,7 +298,7 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
    * @param index Index of scene
    * @return Scene at index
    */
-  public TriggerParameter getScene(int index) {
+  public QuantizedTriggerParameter getScene(int index) {
     if (index < 0) {
       throw new IllegalArgumentException("Cannot request scene less than 0: " + index);
     }
@@ -274,7 +311,7 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
    * @param index Index of pattern scene
    * @return Pattern scene at index
    */
-  public TriggerParameter getPatternScene(int index) {
+  public QuantizedTriggerParameter getPatternScene(int index) {
     if (index < 0) {
       throw new IllegalArgumentException("Cannot request scene less than 0: " + index);
     }
@@ -287,7 +324,7 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
    * @param index Scene index
    * @return this
    */
-  public LXClipEngine launchScene(int index) {
+  public LXClipEngine triggerScene(int index) {
     LXClip clip;
     for (LXAbstractChannel channel : this.lx.engine.mixer.channels) {
       clip = channel.getClip(index);
@@ -303,12 +340,12 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
   }
 
   /**
-   * Launches all patterns at the given index
+   * Triggers all patterns at the given index
    *
    * @param index Pattern index
    * @return this
    */
-  public LXClipEngine launchPatternScene(int index) {
+  public LXClipEngine triggerPatternScene(int index) {
     for (LXAbstractChannel channel : lx.engine.mixer.channels) {
       if (channel instanceof LXChannel) {
         LXChannel c = (LXChannel) channel;
@@ -325,7 +362,7 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
    *
    * @return this
    */
-  public LXClipEngine launchPatternCycle() {
+  public LXClipEngine triggerPatternCycle() {
     for (LXAbstractChannel channel : lx.engine.mixer.channels) {
       if (channel instanceof LXChannel) {
         LXChannel c = (LXChannel) channel;
@@ -376,6 +413,19 @@ public class LXClipEngine extends LXComponent implements LXOscComponent {
       this.gridViewOffset.reset();
       this.numScenes.reset();
     }
+  }
+
+  @Override
+  public void dispose() {
+    this.launchPatternCycle.removeListener(this.patternSceneListener);
+    this.stopClips.removeListener(this.clipSceneListener);
+    for (QuantizedTriggerParameter scene : this.scenes) {
+      scene.removeListener(this.clipSceneListener);
+    }
+    for (QuantizedTriggerParameter pattern : this.patternScenes) {
+      pattern.removeListener(this.patternSceneListener);
+    }
+    super.dispose();
   }
 
 }

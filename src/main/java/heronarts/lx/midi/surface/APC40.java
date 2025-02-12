@@ -49,9 +49,9 @@ import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
 import heronarts.lx.pattern.LXPattern;
 
+@LXMidiSurface.Name("Akai APC40")
+@LXMidiSurface.DeviceName("Akai APC40")
 public class APC40 extends LXMidiSurface implements LXMidiSurface.Bidirectional {
-
-  public static final String DEVICE_NAME = "Akai APC40";
 
   public static final byte GENERIC_MODE = 0x40;
   public static final byte ABLETON_MODE = 0x41;
@@ -641,15 +641,13 @@ public class APC40 extends LXMidiSurface implements LXMidiSurface.Bidirectional 
 
   @Override
   protected void onReconnect() {
-    if (this.enabled.isOn()) {
-      setApcMode(ABLETON_ALTERNATE_MODE);
-      initialize(true);
-      this.deviceListener.resend();
-    }
+    setApcMode(ABLETON_ALTERNATE_MODE);
+    initialize(true);
+    this.deviceListener.resend();
   }
 
   private void setApcMode(byte mode) {
-    this.output.sendSysex(new byte[] {
+    sendSysex(new byte[] {
       (byte) 0xf0, // sysex start
       0x47, // manufacturers id
       0x00, // device id
@@ -1015,9 +1013,9 @@ public class APC40 extends LXMidiSurface implements LXMidiSurface.Bidirectional 
         if (this.clipLaunchEnabled.isOn()) {
           int index = pitch - SCENE_LAUNCH;
           if (this.gridMode == GridMode.PATTERN) {
-            this.lx.engine.clips.launchPatternScene(index + this.mixerSurface.getGridPatternOffset());
+            this.lx.engine.clips.triggerPatternScene(index + this.mixerSurface.getGridPatternOffset());
           } else if (this.gridMode == GridMode.CLIP) {
-            this.lx.engine.clips.launchScene(index + this.mixerSurface.getGridClipOffset());
+            this.lx.engine.clips.triggerScene(index + this.mixerSurface.getGridClipOffset());
           }
         }
         return;
@@ -1227,6 +1225,7 @@ public class APC40 extends LXMidiSurface implements LXMidiSurface.Bidirectional 
       fader.dispose();
     }
     this.deviceListener.dispose();
+    this.mixerSurface.dispose();
     super.dispose();
   }
 

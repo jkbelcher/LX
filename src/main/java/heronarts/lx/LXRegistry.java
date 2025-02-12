@@ -30,7 +30,9 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -156,6 +158,7 @@ public class LXRegistry implements LXSerializable {
   private static final List<Class<? extends LXModulator>> DEFAULT_MODULATORS;
   static {
     DEFAULT_MODULATORS = new ArrayList<Class<? extends LXModulator>>();
+    DEFAULT_MODULATORS.add(heronarts.lx.audio.BandFilter.class);
     DEFAULT_MODULATORS.add(heronarts.lx.audio.BandGate.class);
     DEFAULT_MODULATORS.add(heronarts.lx.audio.SoundObject.class);
     DEFAULT_MODULATORS.add(heronarts.lx.dmx.DmxModulator.class);
@@ -174,10 +177,12 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.MultiTrig.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.NoiseModulator.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.OperatorModulator.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.Quantizer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Randomizer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Scaler.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Smoother.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Spring.class);
+    DEFAULT_MODULATORS.add(heronarts.lx.modulator.Stepper.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.StepSequencer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.Timer.class);
     DEFAULT_MODULATORS.add(heronarts.lx.modulator.VariableLFO.class);
@@ -512,6 +517,10 @@ public class LXRegistry implements LXSerializable {
     this.classLoader = new LXClassLoader(lx);
   }
 
+  public Class<?> getClass(String className) throws ClassNotFoundException {
+    return Class.forName(className, true, this.classLoader);
+  }
+
   protected void initialize() {
     this.contentReloading = true;
     this.classLoader.load();
@@ -699,7 +708,19 @@ public class LXRegistry implements LXSerializable {
     return false;
   }
 
-  protected void addClass(Class<?> clz) {
+  private final Map<String, LXClassLoader.Package> duplicates = new HashMap<String, LXClassLoader.Package>();
+
+  protected void addClass(Class<?> clz, LXClassLoader.Package pack) {
+    final String className = clz.getName();
+    final LXClassLoader.Package duplicate = duplicates.get(className);
+    if (duplicate != null) {
+      String thisFile = lx.getMediaPath(LX.Media.PACKAGES, pack.jarFile);
+      String originalFile = lx.getMediaPath(LX.Media.PACKAGES, duplicate.jarFile);
+      LX.error("Ignoring duplicate class: " + className + " in " + thisFile + " + " + originalFile);
+      return;
+    }
+    this.duplicates.put(className, pack);
+
     if (LXPattern.class.isAssignableFrom(clz)) {
       addPattern(clz.asSubclass(LXPattern.class));
     }
@@ -718,6 +739,8 @@ public class LXRegistry implements LXSerializable {
   }
 
   protected void removeClass(Class<?> clz) {
+    this.duplicates.remove(clz.getName());
+
     if (LXPattern.class.isAssignableFrom(clz)) {
       removePattern(clz.asSubclass(LXPattern.class));
     }

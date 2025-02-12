@@ -91,7 +91,9 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   private Dispatch inputDispatch = null;
 
+  private boolean inLoopTasks = false;
   private final List<LXLoopTask> loopTasks = new ArrayList<LXLoopTask>();
+  private final List<LXLoopTask> removedLoopTasks = new ArrayList<LXLoopTask>();
 
   private final AtomicBoolean hasTask = new AtomicBoolean(false);
   private final List<Runnable> threadSafeTaskQueue = Collections.synchronizedList(new ArrayList<Runnable>());
@@ -99,7 +101,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   public final Output output;
 
-  public final BoundedParameter framesPerSecond = (BoundedParameter)
+  public final BoundedParameter framesPerSecond =
     new BoundedParameter("FPS", 60, 1, 300)
     .setMappable(false)
     .setOscMode(BoundedParameter.OscMode.ABSOLUTE)
@@ -402,7 +404,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     LX.initProfiler.log("Engine: Mixer");
 
     // Modulation matrix
-    addChild("modulation", this.modulation = new LXModulationEngine(lx));
+    addChild(KEY_MODULATION, this.modulation = new LXModulationEngine(lx));
     LX.initProfiler.log("Engine: Modulation");
 
     // Master output
@@ -421,7 +423,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     LX.initProfiler.log("Engine: DMX");
 
     // Midi engine
-    addChild("midi", this.midi = new LXMidiEngine(lx));
+    addChild(KEY_MIDI, this.midi = new LXMidiEngine(lx));
     LX.initProfiler.log("Engine: Midi");
 
     // OSC engine
@@ -936,8 +938,89 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
    * @return this
    */
   public LXEngine removeLoopTask(LXLoopTask loopTask) {
-    this.loopTasks.remove(loopTask);
+    if (this.inLoopTasks) {
+      this.removedLoopTasks.add(loopTask);
+    } else {
+      this.loopTasks.remove(loopTask);
+    }
     return this;
+  }
+
+  /**
+   * A task which runs after an elapsed amount of time, and potentially repeats
+   */
+  public class Timer implements LXLoopTask {
+
+    private double elapsedMs = 0;
+    private final double timerMs;
+    public final boolean isInterval;
+    private final Runnable runnable;
+
+    private Timer(double timerMs, Runnable runnable, boolean isInterval) {
+      if (timerMs <= 0 || !Double.isFinite(timerMs)) {
+        throw new IllegalArgumentException("Timer must have a finite positive value: " + timerMs);
+      }
+      this.timerMs = timerMs;
+      this.runnable = runnable;
+      this.isInterval = isInterval;
+    }
+
+    /**
+     * Cancel any future processing of this timer
+     */
+    public void cancel() {
+      removeLoopTask(this);
+    }
+
+    /**
+     * Reset the timer state back to 0, so the full timeout period must again
+     * pass before execution
+     */
+    public void reset() {
+      this.elapsedMs = 0;
+    }
+
+    @Override
+    public void loop(double deltaMs) {
+      this.elapsedMs += deltaMs;
+      while (this.elapsedMs >= this.timerMs) {
+        this.runnable.run();
+        if (!this.isInterval) {
+          cancel();
+          return;
+        }
+        this.elapsedMs -= this.timerMs;
+      }
+    }
+  }
+
+  /**
+   * Add a task to the engine that will run if the specified duration
+   * of milliseconds expires and the timeout has not been canceled.
+   * The timer is automatically canceled once it has run.
+   *
+   * @param timerMs Timeout in milliseconds
+   * @param runnable Function to run after timeout expires
+   * @return Timer object which can be stopped via cancel()
+   */
+  public Timer addTimeout(double timerMs, Runnable runnable) {
+    final Timer timer = new Timer(timerMs, runnable, false);
+    addLoopTask(timer);
+    return timer;
+  }
+
+  /**
+   * Add a task to the engine that will run periodically every time
+   * the interval has passed, until explicitly canceled.
+   *
+   * @param intervalMs Interval in milliseconds
+   * @param runnable Function to run whenever interval has passed
+   * @return Timer object which can be stopped via cancel()
+   */
+  public Timer addInterval(double intervalMs, Runnable runnable) {
+    final Timer timer = new Timer(intervalMs, runnable, true);
+    addLoopTask(timer);
+    return timer;
   }
 
   /**
@@ -1105,10 +1188,20 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // Run the color control
     this.lx.engine.palette.loop(deltaMs);
 
-    // Run top-level loop tasks
+    // Run top-level loop tasks, take care to handle removals that
+    // are scheduled from within the loop tasks themselves
+    this.inLoopTasks = true;
     for (LXLoopTask loopTask : this.loopTasks) {
       loopTask.loop(deltaMs);
     }
+    this.inLoopTasks = false;
+
+    // Remove any loop tasks that had remove called from within
+    // the iteration loop
+    for (LXLoopTask loopTask : this.removedLoopTasks) {
+      removeLoopTask(loopTask);
+    }
+    this.removedLoopTasks.clear();
 
     // Okay, time for the real work, to run and blend all of our channels
     // First, set up a bunch of state to keep track of which buffers we
@@ -1354,6 +1447,9 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     return super.handleOscMessage(message, parts, index);
   }
 
+  private static final String KEY_MIDI = "midi";
+  private static final String KEY_MODULATION = "modulation";
+
   @Override
   public void load(LX lx, JsonObject obj) {
     // TODO(mcslee): remove loop tasks that other things might have added? maybe
@@ -1361,11 +1457,25 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     // Clear all the modulation and mixer content
     this.snapshots.clear();
+    this.modulation.setFlagLoadModulations(false);
     this.modulation.clear();
     this.mixer.clear();
 
     // Invoke super-loader
     super.load(lx, obj);
+
+    // We need to load global modulations LAST! They can reference stuff in
+    // snapshots, MIDI templates, etc. And we need to load MIDI mappings even
+    // *after* that, since a MIDI mapping could control a modulation depth!!
+    if (obj.has(KEY_CHILDREN)) {
+      final JsonObject children = obj.getAsJsonObject(KEY_CHILDREN);
+      if (children.has(KEY_MODULATION)) {
+        this.modulation.loadModulations(lx, children.getAsJsonObject(KEY_MODULATION));
+      }
+      if (children.has(KEY_MIDI)) {
+        this.midi.loadMappings(lx, children.getAsJsonObject(KEY_MIDI));
+      }
+    }
 
     // Override project output mode if flag is set
     switch (lx.flags.outputMode) {
@@ -1393,6 +1503,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     this.lx.registry.disposePlugins();
 
     // And now remove core engine components
+    LX.dispose(this.clips);
     LX.dispose(this.modulation);
     LX.dispose(this.mixer);
     LX.dispose(this.audio);
