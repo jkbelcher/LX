@@ -1066,8 +1066,10 @@ public abstract class LXClip extends LXRunnableComponent implements LXOscCompone
       JsonArray lanesArr = obj.get(KEY_LANES).getAsJsonArray();
       for (JsonElement laneElement : lanesArr) {
         JsonObject laneObj = laneElement.getAsJsonObject();
-        String laneType = laneObj.get(LXClipLane.KEY_LANE_TYPE).getAsString();
-        loadLane(lx, laneType, laneObj);
+        if (laneObj.has(LXClipLane.KEY_LANE_TYPE)) {
+          String laneType = laneObj.get(LXClipLane.KEY_LANE_TYPE).getAsString();
+          loadLane(lx, laneType, laneObj);
+        }
       }
     }
     super.load(lx, obj);

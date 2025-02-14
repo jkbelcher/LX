@@ -36,6 +36,8 @@ import heronarts.lx.clip.Cursor;
 import heronarts.lx.clip.LXClip;
 import heronarts.lx.clip.LXClipEvent;
 import heronarts.lx.clip.LXClipLane;
+import heronarts.lx.clip.OscClipEvent;
+import heronarts.lx.clip.OscClipLane;
 import heronarts.lx.clip.ParameterClipEvent;
 import heronarts.lx.clip.ParameterClipLane;
 import heronarts.lx.color.ColorParameter;
@@ -3227,6 +3229,45 @@ public abstract class LXCommand {
         @Override
         public void undo(LX lx) throws InvalidCommandException {
           this.clipLane.get().load(lx, this.preState);
+        }
+      }
+
+      public static class OSC {
+
+        public static class InsertEvent extends LXCommand {
+
+          private final ComponentReference<OscClipLane> clipLane;
+          private final Cursor cursor;
+          private int undoIndex;
+
+          public InsertEvent(OscClipLane lane, Cursor cursor) {
+            this.clipLane = new ComponentReference<>(lane);
+            this.cursor = cursor.clone();
+          }
+
+          @Override
+          public String getDescription() {
+            return "Insert Clip Event";
+          }
+
+          @Override
+          public void perform(LX lx) throws InvalidCommandException {
+            OscClipLane clipLane = this.clipLane.get();
+            OscClipEvent insertEvent = clipLane.insertEvent(this.cursor);
+            this.undoIndex = clipLane.events.indexOf(insertEvent);
+
+          }
+
+          @Override
+          public void undo(LX lx) throws InvalidCommandException {
+            OscClipLane clipLane = this.clipLane.get();
+            try {
+              clipLane.removeEvent(clipLane.events.get(this.undoIndex));
+            } catch (Exception x) {
+              throw new InvalidCommandException(x);
+            }
+          }
+
         }
       }
 

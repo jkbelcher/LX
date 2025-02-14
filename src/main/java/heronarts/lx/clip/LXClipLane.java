@@ -334,6 +334,7 @@ public abstract class LXClipLane<T extends LXClipEvent<?>> extends LXComponent {
   protected static final String VALUE_LANE_TYPE_PARAMETER = "parameter";
   protected static final String VALUE_LANE_TYPE_PATTERN = "pattern";
   protected static final String VALUE_LANE_TYPE_MIDI_NOTE = "midiNote";
+  protected static final String VALUE_LANE_TYPE_OSC = "osc";
 
   @Override
   public void load(LX lx, JsonObject obj) {
@@ -371,6 +372,8 @@ public abstract class LXClipLane<T extends LXClipEvent<?>> extends LXComponent {
       obj.addProperty(KEY_LANE_TYPE, VALUE_LANE_TYPE_PATTERN);
     } else if (this instanceof MidiNoteClipLane) {
       obj.addProperty(KEY_LANE_TYPE, VALUE_LANE_TYPE_MIDI_NOTE);
+    } else if (this instanceof OscClipLane) {
+      obj.addProperty(KEY_LANE_TYPE, VALUE_LANE_TYPE_OSC);
     }
     obj.add(KEY_EVENTS, LXSerializable.Utils.toArray(lx, this.events));
   }

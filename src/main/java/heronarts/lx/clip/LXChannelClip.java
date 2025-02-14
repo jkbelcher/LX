@@ -134,6 +134,9 @@ public class LXChannelClip extends LXAbstractChannelClip implements LXChannel.Li
       this.patternLane.load(lx, laneObj);
     } else if (laneType.equals(LXClipLane.VALUE_LANE_TYPE_MIDI_NOTE)) {
       this.midiNoteLane.load(lx, laneObj);
+    } else if (laneType.equals(LXClipLane.VALUE_LANE_TYPE_OSC)) {
+      // TODO: Move to LXClip.loadLane() to allow multiple OSC lanes
+      this.oscLane.load(lx, laneObj);
     } else {
       super.loadLane(lx, laneType, laneObj);
     }

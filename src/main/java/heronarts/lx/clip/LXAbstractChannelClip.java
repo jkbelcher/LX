@@ -27,11 +27,13 @@ public abstract class LXAbstractChannelClip extends LXClip implements LXAbstract
 
   public final LXAbstractChannel channel;
   public final MidiNoteClipLane midiNoteLane = new MidiNoteClipLane(this);
+  public final OscClipLane oscLane = new OscClipLane(this);
 
   protected LXAbstractChannelClip(LX lx, LXAbstractChannel channel, int index, boolean registerListener) {
     super(lx, channel, index, registerListener);
     this.channel = channel;
     this.mutableLanes.add(this.midiNoteLane);
+    this.mutableLanes.add(this.oscLane); // Temporary for demo
     registerParameter(channel.fader);
     registerParameter(channel.enabled);
     channel.addMidiListener(this);
