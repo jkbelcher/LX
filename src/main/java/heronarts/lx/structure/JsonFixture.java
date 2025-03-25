@@ -117,6 +117,9 @@ public class JsonFixture extends LXFixture {
   private static final String VALUE_ARC_MODE_ORIGIN = "origin";
   private static final String VALUE_ARC_MODE_CENTER = "center";
 
+  // Compiled
+  private static final String KEY_CLASS = "class";
+
   // Children
   private static final String KEY_COMPONENTS = "components";
   private static final String KEY_CHILDREN = "children";
@@ -130,6 +133,7 @@ public class JsonFixture extends LXFixture {
   private static final String TYPE_POINTS = "points";
   private static final String TYPE_STRIP = "strip";
   private static final String TYPE_ARC = "arc";
+  private static final String TYPE_COMPILED = "compiled";
 
   // Parameters
   private static final String KEY_PARAMETERS = "parameters";
@@ -340,6 +344,7 @@ public class JsonFixture extends LXFixture {
     POINTS,
     STRIP,
     ARC,
+    COMPILED,
     JSON
   };
 
@@ -1907,6 +1912,43 @@ public class JsonFixture extends LXFixture {
     return arc;
   }
 
+  private LXFixture loadCompiled(JsonObject compiledObj) {
+    String className = loadString(compiledObj, KEY_CLASS, true, "Compiled type must specify " + KEY_CLASS);
+    if (LXUtils.isEmpty(className)) {
+      addWarning("Compiled type must specify " + KEY_CLASS);
+      return null;
+    }
+
+    LXFixture fixture;
+    try {
+      fixture = this.lx.instantiateFixture(className);
+    } catch (LX.InstantiationException e) {
+      addWarning("Failed to load compiled class " + className + ": " + e.getMessage());
+      return null;
+    }
+
+    // Replace inline variables in all string values
+    JsonObject params = (JsonObject) compiledObj.get(KEY_PARAMETERS);
+    for (Map.Entry<String, JsonElement> entry : params.entrySet()) {
+      String key = entry.getKey();
+      JsonElement value = entry.getValue();
+      if (value.isJsonPrimitive()) {
+        JsonPrimitive prim = value.getAsJsonPrimitive();
+        if (prim.isString()) {
+          params.addProperty(key, replaceVariables(key, prim.getAsString(), ParameterType.STRING));
+        }
+      }
+    }
+
+    // Make a copy, remove "id" which here is a componentId, referenced by output segments.
+    // In the fixture.load() method, "id" would be a numeric registry id.
+    JsonObject copy = compiledObj.deepCopy();
+    copy.remove(KEY_ID);
+    fixture.load(this.lx, copy);
+
+    return fixture;
+  }
+
   private void loadComponents(JsonObject obj) {
     JsonArray componentsArr = loadArray(obj, KEY_COMPONENTS);
     if (componentsArr == null) {
@@ -1974,6 +2016,8 @@ public class JsonFixture extends LXFixture {
         loadChild(childObj, ChildType.STRIP, null);
       } else if (TYPE_ARC.equals(type)) {
         loadChild(childObj, ChildType.ARC, null);
+      } else if (TYPE_COMPILED.equals(type)) {
+        loadChild(childObj, ChildType.COMPILED, null);
       } else {
         loadChild(childObj, ChildType.JSON, type);
       }
@@ -2006,6 +2050,9 @@ public class JsonFixture extends LXFixture {
       break;
     case ARC:
       child = loadArc(childObj);
+      break;
+    case COMPILED:
+      child = loadCompiled(childObj);
       break;
     case JSON:
       if ((jsonType == null) || jsonType.isEmpty() || jsonType.equals(PATH_SEPARATOR)) {
@@ -2321,7 +2368,7 @@ public class JsonFixture extends LXFixture {
         num += childFixture.totalSize();
       }
       if (offset >= num) {
-        addWarning("Output " + KEY_COMPONENT_INDEX + " start value " + offset + " exceeds size " + num);
+        addWarning("Output " + componentId + " start value " + offset + " exceeds size " + num);
         return;
       }
       start += offset;
@@ -2353,7 +2400,7 @@ public class JsonFixture extends LXFixture {
         num += childFixture.totalSize();
       }
       if (offset >= num) {
-        addWarning("Output " + KEY_COMPONENT_INDEX + " start value " + offset + " exceeds size " + num);
+        addWarning("Output " + componentIndex + " start value " + offset + " exceeds size " + num);
         return;
       }
       start += offset;
