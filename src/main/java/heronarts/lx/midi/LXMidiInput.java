@@ -67,6 +67,7 @@ public class LXMidiInput extends LXMidiDevice implements LXMidiSource, LXSeriali
         MidiSelector.updateInputs(engine.inputs);
       }
       this.enabled.setValue(this.channelEnabled.isOn() || this.controlEnabled.isOn() || this.syncEnabled.isOn());
+      engine.saveDevices();
     };
     this.channelEnabled.addListener(enabledListener);
     this.controlEnabled.addListener(enabledListener);
@@ -102,6 +103,10 @@ public class LXMidiInput extends LXMidiDevice implements LXMidiSource, LXSeriali
     }
   }
 
+  private boolean inListener = false;
+  private final List<LXMidiListener> addListeners = new ArrayList<>();
+  private final List<LXMidiListener> removeListeners = new ArrayList<>();
+
   /**
    * Registers a listener to this MIDI input
    *
@@ -112,6 +117,10 @@ public class LXMidiInput extends LXMidiDevice implements LXMidiSource, LXSeriali
     Objects.requireNonNull(listener, "May not add null LXMidiInput.LXMidiListener");
     if (this.listeners.contains(listener)) {
       throw new IllegalStateException("Cannot add duplicate LXMidiInput.LXMidiListener: " + listener);
+    }
+    if (this.inListener) {
+      this.addListeners.add(listener);
+      return this;
     }
     this.listeners.add(listener);
     return this;
@@ -126,6 +135,10 @@ public class LXMidiInput extends LXMidiDevice implements LXMidiSource, LXSeriali
   public LXMidiInput removeListener(LXMidiListener listener) {
     if (!this.listeners.contains(listener)) {
       throw new IllegalStateException("Cannot remove non-existent LXMidiInput.LXMidiListener: " + listener);
+    }
+    if (this.inListener) {
+      this.removeListeners.add(listener);
+      return this;
     }
     this.listeners.remove(listener);
     return this;
@@ -227,8 +240,18 @@ public class LXMidiInput extends LXMidiDevice implements LXMidiSource, LXSeriali
    * @param message Midi message
    */
   void dispatch(LXMidiMessage message) {
+    this.inListener = true;
     for (LXMidiListener listener : this.listeners) {
       message.dispatch(listener);
+    }
+    this.inListener = false;
+    if (!this.removeListeners.isEmpty()) {
+      this.removeListeners.forEach(listener -> removeListener(listener));
+      this.removeListeners.clear();
+    }
+    if (!this.addListeners.isEmpty()) {
+      this.addListeners.forEach(listener -> addListener(listener));
+      this.addListeners.clear();
     }
   }
 

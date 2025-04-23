@@ -36,6 +36,7 @@ import heronarts.lx.scheduler.LXScheduler;
 import heronarts.lx.structure.LXFixture;
 import heronarts.lx.structure.LXStructure;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -54,6 +55,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -75,7 +78,8 @@ public class LX {
 
     public enum Type {
       EXCEPTION,
-      LICENSE;
+      LICENSE,
+      PLUGIN;
     }
 
     public final Type type;
@@ -1002,7 +1006,7 @@ public class LX {
         try (JsonWriter writer = new JsonWriter(new FileWriter(autosave))) {
           writer.setIndent("  ");
           new GsonBuilder().create().toJson(obj, writer);
-          LX.log("Project auto-saved successfully to " + autosave.toString());
+          LX.debug("Project auto-saved successfully to " + autosave.toString());
         } catch (IOException iox) {
           LX.error(iox, "Could not auto-save project to output file: " + autosave.toString());
         }
@@ -1103,11 +1107,86 @@ public class LX {
   }
 
   public void openProject(File file) {
+    openProject(file, false);
+  }
+
+  private static final Pattern versionPattern = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-([\\w.-]+))?$");
+
+  private boolean isNewerVersion(String version) {
+    return compareVersion(LX.VERSION, version) < 0;
+  }
+
+  /**
+   * Compares two version strings for mismatch
+   *
+   * @param thisVersion First version
+   * @param thatVersion Second version
+   * @return true if thatVersion is newer than thisVersion
+   */
+  public static int compareVersion(String thisVersion, String thatVersion) {
+    try {
+      Matcher thisMatcher = versionPattern.matcher(thisVersion);
+      Matcher thatMatcher = versionPattern.matcher(thatVersion);
+      if (!thisMatcher.matches()) {
+        throw new IllegalArgumentException("Couldn't parse: " + thisVersion);
+      }
+      if (!thatMatcher.matches()) {
+        throw new IllegalArgumentException("Couldn't parse: " + thatVersion);
+      }
+      int thisMajor = Integer.valueOf(thisMatcher.group(1));
+      int thisMinor = Integer.valueOf(thisMatcher.group(2));
+      int thisPatch = Integer.valueOf(thisMatcher.group(3));
+
+      int thatMajor = Integer.valueOf(thatMatcher.group(1));
+      int thatMinor = Integer.valueOf(thatMatcher.group(2));
+      int thatPatch = Integer.valueOf(thatMatcher.group(3));
+
+      int majorCompare = thisMajor < thatMajor ? -1 : (thisMajor == thatMajor) ? 0 : 1;
+      if (majorCompare != 0) {
+        return majorCompare;
+      }
+      int minorCompare = thisMinor < thatMinor ? -1 : (thisMinor == thatMinor) ? 0 : 1;
+      if (minorCompare != 0) {
+        return minorCompare;
+      }
+      return thisPatch < thatPatch ? -1 : (thisPatch == thatPatch) ? 0 : 1;
+    } catch (Exception x) {
+      error(x, "Failed to parse LX version identifier");
+    }
+    return 0;
+  }
+
+  public void openProject(File file, boolean checkVersion) {
+    try (FileReader fr = new FileReader(file)) {
+      final JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
+      final String fileVersion = obj.has(KEY_VERSION) ? obj.get(KEY_VERSION).getAsString() : null;
+      if ((fileVersion != null) && isNewerVersion(fileVersion)) {
+        LX.warning(file.getName() + ": project version " + fileVersion + " is newer than app version " + LX.VERSION);
+        if (checkVersion) {
+          showConfirmDialog(
+            "Project version: " + fileVersion + "\n" +
+            "App version: " + LX.VERSION + "\n\n" +
+            "The project may not load properly, proceed?",
+            () -> _openProject(file, obj)
+          );
+          return;
+        }
+      }
+      _openProject(file, obj);
+    } catch (FileNotFoundException fnfx) {
+      LX.error(fnfx, "Project file not found: " + fnfx.getLocalizedMessage());
+      pushError(fnfx, "Project file not found: " + fnfx.getLocalizedMessage());
+    } catch (IOException iox) {
+      LX.error("Could not read project file: " + iox.getLocalizedMessage());
+      pushError(iox, "Could not read project file: " + iox.getLocalizedMessage());
+    }
+  }
+
+  private void _openProject(File file, JsonObject obj) {
     for (ProjectListener projectListener : this.projectListeners) {
       projectListener.projectChanged(file, ProjectListener.Change.TRY);
     }
-    try (FileReader fr = new FileReader(file)) {
-      JsonObject obj = new Gson().fromJson(fr, JsonObject.class);
+    try {
       closeProject();
       this.componentRegistry.projectLoading = true;
       this.componentRegistry.setIdCounter(getMaxId(obj, this.componentRegistry.getIdCounter()) + 1);
@@ -1126,9 +1205,6 @@ public class LX {
       this.componentRegistry.projectLoading = false;
       setProject(file, ProjectListener.Change.OPEN);
       LX.log("Project loaded successfully from " + file.toString());
-    } catch (IOException iox) {
-      LX.error("Could not load project file: " + iox.getLocalizedMessage());
-      pushError(iox, "Could not load project file: " + iox.getLocalizedMessage());
     } catch (Exception x) {
       LX.error(x, "Exception in openProject: " + x.getLocalizedMessage());
       pushError(x, "Exception in openProject: " + x.getLocalizedMessage());
@@ -1162,6 +1238,10 @@ public class LX {
     } else {
       confirm.run();
     }
+  }
+
+  public void showConfirmDialog(String message, Runnable confirm) {
+    confirm.run();
   }
 
   protected void showConfirmUnsavedProjectDialog(String message, Runnable confirm) {
@@ -1302,7 +1382,14 @@ public class LX {
 
   public boolean canInstantiate(Class<? extends LXComponent> clz) {
     LXLicense license = clz.getAnnotation(LXLicense.class);
-    return (license == null) || this.permissions.hasPackageLicense(license.value());
+    if ((license != null) && !this.permissions.hasPackageLicense(license.value())) {
+      return false;
+    }
+    LXComponent.PluginRequired pluginRequired = clz.getAnnotation(LXComponent.PluginRequired.class);
+    if ((pluginRequired != null) && !this.registry.isPluginClassEnabled(pluginRequired.value())) {
+      return false;
+    }
+    return true;
   }
 
   public LXModel instantiateModel(String className) throws InstantiationException {
@@ -1333,6 +1420,14 @@ public class LX {
       final String pkg = license.value();
       if (!this.permissions.hasPackageLicense(pkg)) {
         throw new InstantiationException(InstantiationException.Type.LICENSE, "Class requires valid license for package: " + pkg);
+      }
+    }
+
+    LXComponent.PluginRequired pluginRequired = cls.getAnnotation(LXComponent.PluginRequired.class);
+    if (pluginRequired != null) {
+      final Class<? extends LXPlugin> pluginClass = pluginRequired.value();
+      if (!this.registry.isPluginClassEnabled(pluginClass)) {
+        throw new InstantiationException(InstantiationException.Type.PLUGIN, LXComponent.getComponentName(cls) + " requires plugin " + LXPlugin.getPluginName(pluginClass));
       }
     }
 
@@ -1429,10 +1524,17 @@ public class LX {
   }
 
   public static boolean LOG_WARNINGS = false;
+  public static boolean LOG_DEBUG = false;
 
   public static void warning(String message) {
     if (LOG_WARNINGS) {
       _log(System.out, "<WARNING> " + message);
+    }
+  }
+
+  public static void debug(String message) {
+    if (LOG_DEBUG) {
+      _log(System.out, "<DEBUG> " + message);
     }
   }
 

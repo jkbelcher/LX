@@ -56,20 +56,25 @@ public class APCmini extends APCminiSurface {
   public static final int LED_RED_BLINK = 4;
   public static final int LED_YELLOW = 5;
   public static final int LED_YELLOW_BLINK = 6;
+  public static final int LED_CLIP_STOP_BLINK = 2;
 
   // Configurable color options
   public static final int LED_PATTERN_ACTIVE = LED_RED;
   public static final int LED_PATTERN_INACTIVE = LED_YELLOW;
-  public static final int LED_PATTERN_FOCUSED = LED_YELLOW_BLINK;
+  public static final int LED_PATTERN_FOCUSED = LED_YELLOW;
   public static final int LED_PATTERN_ENABLED = LED_GREEN;
   public static final int LED_PATTERN_DISABLED = LED_RED;
   public static final int LED_PATTERN_DISABLED_FOCUSED = LED_RED_BLINK;
   public static final int LED_PATTERN_TRANSITION = LED_RED_BLINK;
+  public static final int LED_PATTERN_PENDING = LED_GREEN_BLINK;
 
   public static final int LED_CLIP_INACTIVE = LED_YELLOW;
   public static final int LED_CLIP_PLAY = LED_GREEN;
+  public static final int LED_CLIP_PLAY_PENDING = LED_GREEN_BLINK;
+  public static final int LED_CLIP_STOP_PENDING = LED_CLIP_STOP_BLINK;
   public static final int LED_CLIP_ARM = LED_RED;
   public static final int LED_CLIP_RECORD = LED_RED_BLINK;
+  public static final int LED_CLIP_RECORD_PENDING = LED_YELLOW_BLINK;
 
   public static final int LED_PARAMETER_INCREMENT = LED_GREEN;
   public static final int LED_PARAMETER_DECREMENT = LED_YELLOW;
@@ -296,6 +301,16 @@ public class APCmini extends APCminiSurface {
       }
 
       @Override
+      public int getPatternPendingBehavior() {
+        return MIDI_CHANNEL_SINGLE;
+      }
+
+      @Override
+      public int getPatternPendingColor() {
+        return LED_PATTERN_PENDING;
+      }
+
+      @Override
       public int getClipRecordBehavior() {
         return MIDI_CHANNEL_SINGLE;
       }
@@ -303,6 +318,16 @@ public class APCmini extends APCminiSurface {
       @Override
       public int getClipRecordColor() {
         return LED_CLIP_RECORD;
+      }
+
+      @Override
+      public int getClipRecordPendingBehavior() {
+        return MIDI_CHANNEL_SINGLE;
+      }
+
+      @Override
+      public int getClipRecordPendingColor() {
+        return LED_CLIP_RECORD_PENDING;
       }
 
       @Override
@@ -333,6 +358,21 @@ public class APCmini extends APCminiSurface {
       @Override
       public int getClipPlayColor() {
         return LED_CLIP_PLAY;
+      }
+
+      @Override
+      public int getClipPlayPendingBehavior() {
+        return MIDI_CHANNEL_SINGLE;
+      }
+
+      @Override
+      public int getClipPlayPendingColor() {
+        return LED_CLIP_PLAY_PENDING;
+      }
+
+      @Override
+      public int getClipStopPendingColor() {
+        return LED_CLIP_STOP_PENDING;
       }
 
     };

@@ -24,7 +24,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -150,6 +152,7 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_EFFECTS.add(heronarts.lx.effect.DynamicsEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.InvertEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.HueSaturationEffect.class);
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.LinearMaskEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.SparkleEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.StrobeEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.midi.GateEffect.class);
@@ -517,6 +520,10 @@ public class LXRegistry implements LXSerializable {
     this.classLoader = new LXClassLoader(lx);
   }
 
+  public LXClassLoader getClassLoader() {
+    return this.classLoader;
+  }
+
   public Class<?> getClass(String className) throws ClassNotFoundException {
     return Class.forName(className, true, this.classLoader);
   }
@@ -621,7 +628,12 @@ public class LXRegistry implements LXSerializable {
     return true;
   }
 
+  private static final String PACKAGE_MEDIA_DIR = "mediaDir";
+
+  private boolean packageMediaConflicts = false;
+
   private void installPackageMedia(File file) {
+    this.packageMediaConflicts = false;
     try (JarFile jarFile = new JarFile(file)) {
       JarEntry packageEntry = jarFile.getJarEntry(LXClassLoader.PACKAGE_DESCRIPTOR_FILE_NAME);
       if (packageEntry == null) {
@@ -629,7 +641,11 @@ public class LXRegistry implements LXSerializable {
         return;
       }
       JsonObject obj = new Gson().fromJson(new InputStreamReader(jarFile.getInputStream(packageEntry)), JsonObject.class);
-      String packageDir = obj.get("mediaDir").getAsString();
+      if (!obj.has(PACKAGE_MEDIA_DIR)) {
+        this.lx.pushError("Package does not specify \"" + PACKAGE_MEDIA_DIR + "\", cannot install media: " + jarFile.getName());
+        return;
+      }
+      String packageDir = obj.get(PACKAGE_MEDIA_DIR).getAsString();
 
       Enumeration<JarEntry> entries = jarFile.entries();
       while (entries.hasMoreElements()) {
@@ -641,20 +657,48 @@ public class LXRegistry implements LXSerializable {
           copyPackageMedia(packageDir, LX.Media.MODELS, jarFile, entry);
         } else if (fileName.startsWith("projects/") && fileName.endsWith(".lxp")) {
           copyPackageMedia(packageDir, LX.Media.PROJECTS, jarFile, entry);
+        } else if (fileName.startsWith("scripts/") && fileName.endsWith(".js")) {
+          copyPackageMedia(packageDir, LX.Media.SCRIPTS, jarFile, entry);
+        } else if (fileName.startsWith("colors/") && fileName.endsWith(".lxc")) {
+          copyPackageMedia(packageDir, LX.Media.COLORS, jarFile, entry);
+        } else if (fileName.startsWith("views/") && fileName.endsWith(".lxv")) {
+          copyPackageMedia(packageDir, LX.Media.VIEWS, jarFile, entry);
+        } else if (fileName.startsWith("presets/") && fileName.endsWith(".lxd")) {
+          copyPackageMedia(packageDir, LX.Media.PRESETS, jarFile, entry);
         }
       }
     } catch (Throwable throwable) {
       LX.error(throwable, "Error loading JAR file " + file + " - " + throwable.getLocalizedMessage());
     }
+    if (this.packageMediaConflicts) {
+      this.lx.pushError("Package media files conflict with existing files, backups were made. See log for details.");
+    }
   }
 
+  private static final DateFormat BACKUP_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
+
   private void copyPackageMedia(String packageDirName, LX.Media media, JarFile jarFile, JarEntry entry) throws IOException {
-    // Lop off the first package media folder name
+    // Lop off the first package media type name
     String entryName = entry.getName();
     entryName = entryName.substring(entryName.indexOf('/') + 1);
 
     // Make a directory for the package media of this type
-    File packageDir = this.lx.getMediaFile(media, packageDirName, true);
+    File packageDir = (media == LX.Media.PRESETS) ?
+      this.lx.getMediaFolder(media, true) :
+      this.lx.getMediaFile(media, packageDirName, true);
+
+    // For presets, fork package name after device
+    if (media == LX.Media.PRESETS) {
+      int firstSlash = entryName.indexOf('/');
+      if (firstSlash < 0) {
+        entryName = packageDirName + '/' + entryName;
+      } else {
+        entryName =
+          entryName.substring(0, firstSlash) +
+          '/' + packageDirName +
+          entryName.substring(firstSlash);
+      }
+    }
 
     // Are their subdirs within this package's content? Break up if so...
     int lastSlash = entryName.lastIndexOf('/');
@@ -667,12 +711,48 @@ public class LXRegistry implements LXSerializable {
     // Ensure package subdirs exist
     packageDir.mkdirs();
 
-    // Copy the file over
-    Files.copy(
-      jarFile.getInputStream(entry),
-      new File(packageDir, entryName).toPath(),
-      StandardCopyOption.REPLACE_EXISTING
-    );
+    // Make backups if clobbering existing content
+    final File destinationFile = new File(packageDir, entryName);
+
+    if (!destinationFile.exists()) {
+      // Just copy the file over
+      Files.copy(
+        jarFile.getInputStream(entry),
+        destinationFile.toPath(),
+        StandardCopyOption.REPLACE_EXISTING
+      );
+    } else {
+
+      final Path destinationFilePath = destinationFile.toPath();
+      final Path tmpFilePath = new File(packageDir, entryName + ".tmp").toPath();
+
+      // Write to a tmp file, check for changes
+      Files.copy(
+        jarFile.getInputStream(entry),
+        tmpFilePath,
+        StandardCopyOption.REPLACE_EXISTING
+      );
+      if (Files.mismatch(destinationFilePath, tmpFilePath) < 0) {
+        // No changes, nuke this tmp file
+        Files.delete(tmpFilePath);
+      } else {
+        // Note the conflict, backup the existing file, put the temp file into its place
+        this.packageMediaConflicts = true;
+        final String timestamp = BACKUP_DATE_FORMAT.format(Calendar.getInstance().getTime());
+        final Path backupFilePath = new File(packageDir, entryName + "-" + timestamp + ".backup").toPath();
+        Files.move(
+          destinationFilePath,
+          backupFilePath,
+          StandardCopyOption.REPLACE_EXISTING
+        );
+        Files.move(
+          tmpFilePath,
+          destinationFilePath,
+          StandardCopyOption.REPLACE_EXISTING
+        );
+        LX.error("Package media file conflict, backed up to: " + backupFilePath.toString());
+      }
+    }
   }
 
   public void uninstallPackage(LXClassLoader.Package pack) {
@@ -691,21 +771,29 @@ public class LXRegistry implements LXSerializable {
     }
   }
 
-  private static final Class<?>[] COMPONENT_CLASSES = {
-    LXPattern.class,
-    LXEffect.class,
-    LXModulator.class,
-    LXFixture.class,
-    LXPlugin.class
-  };
+  public enum ComponentType {
+    PATTERN(LXPattern.class, "pattern"),
+    EFFECT(LXEffect.class, "effect"),
+    MODULATOR(LXModulator.class, "modulator"),
+    FIXTURE(LXFixture.class, "fixture"),
+    PLUGIN(LXPlugin.class, "plugin");
 
-  protected boolean isInstantiableComponent(Class<?> clz) {
-    for (Class<?> componentClass : COMPONENT_CLASSES) {
-      if (componentClass.isAssignableFrom(clz)) {
-        return true;
+    public final Class<?> componentClass;
+    public final String label;
+
+    private ComponentType(Class<?> componentClass, String label) {
+      this.componentClass = componentClass;
+      this.label = label;
+    }
+  }
+
+  protected ComponentType getInstantiableComponentType(Class<?> clz) {
+    for (ComponentType componentType : ComponentType.values()) {
+      if (componentType.componentClass.isAssignableFrom(clz)) {
+        return componentType;
       }
     }
-    return false;
+    return null;
   }
 
   private final Map<String, LXClassLoader.Package> duplicates = new HashMap<String, LXClassLoader.Package>();
@@ -1204,6 +1292,15 @@ public class LXRegistry implements LXSerializable {
       }
     }
     return null;
+  }
+
+  public boolean isPluginClassEnabled(Class<? extends LXPlugin> pluginClass) {
+    for (Plugin plugin : this.plugins) {
+      if (plugin.clazz.equals(pluginClass) && plugin.isEnabled && !plugin.hasError) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private JsonArray pluginState = new JsonArray();

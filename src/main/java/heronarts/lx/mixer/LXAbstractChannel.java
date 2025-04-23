@@ -209,6 +209,8 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
     this.blendBuffer = new ModelBuffer(lx);
     this.colors = this.blendBuffer.getArray();
 
+    this.autoMute.setValue(lx.engine.mixer.autoMuteDefault.isOn());
+
     this.blendMode = new ObjectParameter<LXBlend>("Blend", new LXBlend[1])
       .setDescription("Specifies the blending function used for the channel fader");
     updateChannelBlendOptions();
@@ -251,13 +253,17 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
     return false;
   }
 
-  void updateChannelBlendOptions() {
+  private void disposeChannelBlendOptions() {
     for (LXBlend blend : this.blendMode.getObjects()) {
       if (blend != null) {
         LX.dispose(blend);
       }
     }
-    this.blendMode.setObjects(lx.engine.mixer.instantiateChannelBlends());
+  }
+
+  void updateChannelBlendOptions() {
+    disposeChannelBlendOptions();
+    this.blendMode.setObjects(lx.engine.mixer.instantiateChannelBlends(this));
     this.activeBlend = this.blendMode.getObject();
     this.activeBlend.onActive();
   }
@@ -356,9 +362,8 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
 
   @Override
   public void loop(double deltaMs) {
-    if (this.autoMute.isOn()) {
-      this.isAutoMuted.setValue(this.fader.getValue() == 0);
-    }
+    this.isAutoMuted.setValue(this.autoMute.isOn() && (this.fader.getValue() == 0));
+
     // Figure out if we need to loop components and modulators etc.
     this.isAnimating = isAnimating();
     super.loop(deltaMs, this.isAnimating);
@@ -406,7 +411,10 @@ public abstract class LXAbstractChannel extends LXBus implements LXComponent.Ren
       this.thread.interrupt();
     }
     super.dispose();
+    disposeChannelBlendOptions();
     this.blendBuffer.dispose();
+    this.midiListeners.forEach(listener -> LX.warning("Stranded LXAbstractChannel.MidiListener: " + listener));
+    this.listeners.forEach(listener -> LX.warning("Stranded LXAbstractChannel.Listener: " + listener));
     this.midiListeners.clear();
     this.listeners.clear();
   }

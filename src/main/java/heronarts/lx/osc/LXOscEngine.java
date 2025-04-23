@@ -510,6 +510,11 @@ public class LXOscEngine extends LXComponent {
       return this.active.isOn() && (this.state.getEnum() == IOState.BOUND);
     }
 
+    private boolean isAddressFiltered(String oscAddress) {
+      final String prefixFilter = (this.connection != null) ? this.connection.getFilter() : null;
+      return (prefixFilter != null) && !OscMessage.hasPrefix(oscAddress, prefixFilter);
+    }
+
     @Override
     public void onParameterChanged(LXParameter parameter) {
       // TODO(mcslee): contemplate accumulating OscMessages into OscBundle
@@ -526,28 +531,26 @@ public class LXOscEngine extends LXComponent {
       }
 
       // Apply prefix filter if it exists
-      final String prefixFilter = (this.connection != null) ? this.connection.getFilter() : null;
-      if ((prefixFilter != null) && !OscMessage.hasPrefix(address, prefixFilter)) {
+      if (isAddressFiltered(address)) {
         return;
       }
 
       // This checks out, set the osc message values and ship it
       oscMessage.clearArguments();
       oscMessage.setAddressPattern(address);
-      if (parameter instanceof BooleanParameter) {
-        oscInt.setValue(((BooleanParameter) parameter).isOn() ? 1 : 0);
+      if (parameter instanceof BooleanParameter b) {
+        oscInt.setValue(b.isOn() ? 1 : 0);
         oscMessage.add(oscInt);
-      } else if (parameter instanceof StringParameter) {
-        oscString.setValue(((StringParameter) parameter).getString());
+      } else if (parameter instanceof StringParameter string) {
+        oscString.setValue(string.getString());
         oscMessage.add(oscString);
-      } else if (parameter instanceof ColorParameter) {
-        oscInt.setValue(((ColorParameter) parameter).getBaseColor());
+      } else if (parameter instanceof ColorParameter color) {
+        oscInt.setValue(color.getBaseColor());
         oscMessage.add(oscInt);
-      } else if (parameter instanceof DiscreteParameter) {
-        oscInt.setValue(((DiscreteParameter) parameter).getBaseValuei());
+      } else if (parameter instanceof DiscreteParameter discrete) {
+        oscInt.setValue(discrete.getBaseValuei());
         oscMessage.add(oscInt);
-      } else if (parameter instanceof LXNormalizedParameter) {
-        LXNormalizedParameter normalizedParameter = (LXNormalizedParameter) parameter;
+      } else if (parameter instanceof LXNormalizedParameter normalizedParameter) {
         if (normalizedParameter.getOscMode() == LXNormalizedParameter.OscMode.ABSOLUTE) {
           oscFloat.setValue(normalizedParameter.getBaseValuef());
         } else {
@@ -562,7 +565,7 @@ public class LXOscEngine extends LXComponent {
     }
 
     private void sendMessage(String address, int value) {
-      if (isActive()) {
+      if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
         oscInt.setValue(value);
@@ -572,7 +575,7 @@ public class LXOscEngine extends LXComponent {
     }
 
     private void sendMessage(String address, float value) {
-      if (isActive()) {
+      if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
         oscFloat.setValue(value);
@@ -582,7 +585,7 @@ public class LXOscEngine extends LXComponent {
     }
 
     private void sendMessage(String address, String value) {
-      if (isActive()) {
+      if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
         oscString.setValue(value);
@@ -621,7 +624,9 @@ public class LXOscEngine extends LXComponent {
     private final List<OscMessage> engineThreadEventQueue = new ArrayList<OscMessage>();
 
     private final List<LXOscListener> listeners = new ArrayList<LXOscListener>();
-    private final List<LXOscListener> listenerSnapshot = new ArrayList<LXOscListener>();
+    private boolean inListener = false;
+    private final List<LXOscListener> removeListeners = new ArrayList<>();
+    private final List<LXOscListener> addListeners = new ArrayList<>();
 
     private BooleanParameter log;
     private TriggerParameter activity;
@@ -668,6 +673,10 @@ public class LXOscEngine extends LXComponent {
       if (this.listeners.contains(listener)) {
         throw new IllegalStateException("Cannot add duplicate LXOscEngine.Receiver.LXOscListener: " + listener);
       }
+      if (this.inListener) {
+        this.addListeners.add(listener);
+        return this;
+      }
       this.listeners.add(listener);
       return this;
     }
@@ -675,6 +684,10 @@ public class LXOscEngine extends LXComponent {
     public Receiver removeListener(LXOscListener listener) {
       if (!this.listeners.contains(listener)) {
         throw new IllegalStateException("Cannot remove non-existent LXOscEngine.Receiver.LXOscListener: " + listener);
+      }
+      if (this.inListener) {
+        this.removeListeners.add(listener);
+        return this;
       }
       this.listeners.remove(listener);
       return this;
@@ -724,10 +737,9 @@ public class LXOscEngine extends LXComponent {
         }
         // TODO(mcslee): do we want to handle NTP timetags?
 
-        // NOTE(mcslee): we iterate this way so that listeners can modify the
-        // listener list
-        this.listenerSnapshot.clear();
-        this.listenerSnapshot.addAll(this.listeners);
+        // NOTE(mcslee): Set a flag that we're in listener dispatch, modifications
+        // to the listener list will be post-processed to avoid ConcurrentModificationException
+        this.inListener = true;
 
         final String prefixFilter = (this.connection != null) ? this.connection.getFilter() : null;
 
@@ -739,7 +751,7 @@ public class LXOscEngine extends LXComponent {
             if (this.activity != null) {
               this.activity.trigger();
             }
-            for (LXOscListener listener : this.listenerSnapshot) {
+            for (LXOscListener listener : this.listeners) {
               try {
                 listener.oscMessage(message);
               } catch (Exception x) {
@@ -747,6 +759,17 @@ public class LXOscEngine extends LXComponent {
               }
             }
           }
+        }
+
+        // Post-process listener modifications
+        this.inListener = false;
+        if (!this.removeListeners.isEmpty()) {
+          this.removeListeners.forEach(listener -> removeListener(listener));
+          this.removeListeners.clear();
+        }
+        if (!this.addListeners.isEmpty()) {
+          this.addListeners.forEach(listener -> addListener(listener));
+          this.addListeners.clear();
         }
       }
     }
@@ -1082,6 +1105,7 @@ public class LXOscEngine extends LXComponent {
   @Override
   public void dispose() {
     super.dispose();
+    this.listeners.forEach(listener -> LX.warning("Stranged LXOscEngine.Listener: " + listener));
     this.listeners.clear();
     if (this.engineTransmitter != null) {
       this.engineTransmitter.dispose();

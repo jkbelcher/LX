@@ -1,5 +1,5 @@
 /**
- * Copyright 2017- Mark C. Slee, Heron Arts LLC
+ * Copyright 2025- Mark C. Slee, Heron Arts LLC
  *
  * This file is part of the LX Studio software library. By using
  * LX, you agree to the terms of the LX Studio Software License
@@ -16,22 +16,17 @@
  * @author Mark C. Slee <mark@heronarts.com>
  */
 
-package heronarts.lx.clip;
+package heronarts.lx.parameter;
 
-import heronarts.lx.LX;
+public interface IEnumParameter<T extends Enum<T>> extends LXParameter {
 
-public class LXMasterClip extends LXClip {
-  public LXMasterClip(LX lx, int index) {
-    super(lx, lx.engine.mixer.masterBus, index);
-    registerParameter(lx.engine.mixer.masterBus.fader);
-    registerParameter(lx.engine.mixer.crossfader);
-    registerComponent(lx.engine.palette);
-  }
+  public T getEnum();
 
-  @Override
-  public void dispose() {
-    unregisterParameter(lx.engine.mixer.masterBus.fader);
-    unregisterParameter(lx.engine.mixer.crossfader);
-    super.dispose();
-  }
+  public T getBaseEnum();
+
+  public int getValuei();
+
+  public int getBaseValuei();
+
+  public IEnumParameter<T> setEnum(String enumName);
 }

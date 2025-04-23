@@ -116,8 +116,8 @@ public class ObjectParameter<T> extends DiscreteParameter {
   }
 
   @Override
-  public ObjectParameter<T> setRange(int minValue, int maxValue) {
-    if (this.objects!= null && (this.objects.length != maxValue - minValue)) {
+  public ObjectParameter<T> setRange(int minValue, long maxValue) {
+    if (this.objects != null && (this.objects.length != maxValue - minValue)) {
       throw new UnsupportedOperationException("May not call setRange on an ObjectParameter with Object list of different length");
     }
     super.setRange(minValue, maxValue);
@@ -138,6 +138,10 @@ public class ObjectParameter<T> extends DiscreteParameter {
 
   public T[] getObjects() {
     return this.objects;
+  }
+
+  public T getBaseObject() {
+    return getObject();
   }
 
   public T getObject() {

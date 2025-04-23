@@ -34,6 +34,7 @@ import heronarts.lx.osc.OscMessage;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.QuantizedTriggerParameter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -47,7 +48,7 @@ import com.google.gson.JsonObject;
  * Abstract representation of a channel, which could be a normal channel with patterns
  * or the master channel.
  */
-public abstract class LXBus extends LXModelComponent implements LXPresetComponent, LXOscComponent, LXModulationContainer {
+public abstract class LXBus extends LXModelComponent implements LXPresetComponent, LXOscComponent, LXModulationContainer, LXEffect.Container {
 
   /**
    * Listener interface for objects which want to be notified when the internal
@@ -103,7 +104,8 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     .setDescription("Whether the channel is selected");
 
   public final QuantizedTriggerParameter stopClips =
-    new QuantizedTriggerParameter(lx, "Stop Clips", this::stopClips)
+    new QuantizedTriggerParameter(lx, "Stop Clips", this::_stopClipsQuantized)
+    .onSchedule(this::_stopClipsScheduled)
     .setDescription("Stops all clips running on the bus");
 
   public final BooleanParameter controlsExpandedCue =
@@ -123,6 +125,12 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
 
   private final List<LXClip> mutableClips = new ArrayList<LXClip>();
   public final List<LXClip> clips = Collections.unmodifiableList(this.mutableClips);
+
+  private LXClip runningClip = null;
+
+  public final BooleanParameter hasRunningClip =
+    new BooleanParameter("Clip Running", false)
+    .setDescription("Flag indicates when a clip is active on this bus");
 
   private final List<Listener> listeners = new ArrayList<Listener>();
   private final List<ClipListener> clipListeners = new ArrayList<ClipListener>();
@@ -272,10 +280,7 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     return getGroup() != null;
   }
 
-  public final LXBus addEffect(LXEffect effect) {
-    return addEffect(effect, -1);
-  }
-
+  @Override
   public final LXBus addEffect(LXEffect effect, int index) {
     if (index > this.mutableEffects.size()) {
       throw new IllegalArgumentException("Illegal effect index: " + index);
@@ -292,6 +297,7 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     return this;
   }
 
+  @Override
   public final LXBus removeEffect(LXEffect effect) {
     int index = this.mutableEffects.indexOf(effect);
     if (index >= 0) {
@@ -309,19 +315,6 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     return this;
   }
 
-  public LXBus reloadEffect(LXEffect effect) {
-    if (!this.effects.contains(effect)) {
-      throw new IllegalStateException("Cannot reload effect not on a channel");
-    }
-    // TODO(mcslee): Collect and restore global modulations to this effect!
-    int index = effect.getIndex();
-    JsonObject effectObj = new JsonObject();
-    effect.save(getLX(), effectObj);
-    removeEffect(effect);
-    loadEffect(effectObj, index);
-    return this;
-  }
-
   private void _reindexEffects() {
     int i = 0;
     for (LXEffect e : this.mutableEffects) {
@@ -329,6 +322,7 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     }
   }
 
+  @Override
   public LXBus moveEffect(LXEffect effect, int index) {
     if (index < 0 || index >= this.mutableEffects.size()) {
       throw new IllegalArgumentException("Cannot move effect to invalid index: " + index);
@@ -345,36 +339,17 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     return this;
   }
 
+  @Override
   public final List<LXEffect> getEffects() {
     return this.effects;
   }
 
-  public LXEffect getEffect(int i) {
-    return this.effects.get(i);
-  }
-
-  public LXEffect getEffect(String label) {
-    for (LXEffect effect : this.effects) {
-      if (effect.getLabel().equals(label)) {
-        return effect;
-      }
-    }
-    return null;
-  }
-
   public LXClip getClip(int index) {
-    return getClip(index, false);
-  }
-
-  public LXClip getClip(int index, boolean create) {
     if (index >= lx.engine.clips.numScenes.getValuei()) {
       return null;
     }
     if (index < this.clips.size()) {
       return this.clips.get(index);
-    }
-    if (create) {
-      return addClip(index);
     }
     return null;
   }
@@ -384,10 +359,18 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
   }
 
   public LXClip addClip(int index) {
-    return addClip(null, index);
+    return addClip(index, false);
+  }
+
+  public LXClip addClip(int index, boolean enableSnapshot) {
+    return addClip(null, index, enableSnapshot);
   }
 
   public LXClip addClip(JsonObject clipObj, int index) {
+    return addClip(clipObj, index, false);
+  }
+
+  private LXClip addClip(JsonObject clipObj, int index, boolean enableSnapshot) {
     if (index >= LXClipEngine.MAX_SCENES) {
       throw new IllegalArgumentException("Cannot add clip at index >= " + LXClipEngine.MAX_SCENES);
     }
@@ -401,7 +384,7 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     if (clipObj != null) {
       clip.load(this.lx, clipObj);
     } else {
-      clip.snapshot.initialize();
+      clip.snapshotEnabled.setValue(enableSnapshot);
       clip.label.setValue(getClipLabel() + "-" + (index+1));
     }
     this.mutableClips.set(index, clip);
@@ -411,10 +394,70 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     return clip;
   }
 
+  /**
+   * NOT A PUBLIC API! DO NOT CALL THIS!
+   * Used by LXClip internals
+   *
+   * @param clip Clip that started running on this bus
+   */
+  public void onClipStart(LXClip clip) {
+    if (this.runningClip != null) {
+      LX.error(new IllegalStateException("LXBus.onClipStart() called while another clip still running: " + clip));
+    }
+    this.runningClip = clip;
+    this.hasRunningClip.setValue(true);
+  }
+
+  /**
+   * NOT A PUBLIC API! DO NOT CALL THIS!
+   * Used by LXClip internals
+   *
+   * @param clip Clip that stopped running on this bus
+   */
+  public void onClipStop(LXClip clip) {
+    if (this.runningClip != clip) {
+      LX.error(new IllegalStateException("LXBus.onClipStop() called for clip that wasn't started here? " + clip));
+    }
+    this.hasRunningClip.setValue(false);
+    this.runningClip = null;
+  }
+
+  public LXClip getRunningClip() {
+    return this.runningClip;
+  }
+
   protected String getClipLabel() {
     return "Clip";
   }
 
+  private void _stopClipsScheduled() {
+    boolean hasStoppingClip = false;
+    for (LXClip clip : this.clips) {
+      if (clip != null) {
+        if (clip.isRunning()) {
+          clip.stop.trigger();
+          hasStoppingClip = true;
+        }
+        clip.launch.cancel();
+        clip.launchAutomation.cancel();
+      }
+    }
+    if (!hasStoppingClip) {
+      this.stopClips.cancel();
+    }
+  }
+
+  private void _stopClipsQuantized(boolean quantized) {
+    if (!quantized) {
+      stopClips();
+    }
+  }
+
+  /**
+   * Stops all clips
+   *
+   * @return this
+   */
   public LXBus stopClips() {
     for (LXClip clip : this.clips) {
       if (clip != null) {
@@ -435,7 +478,7 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
   }
 
   public void removeClip(int index) {
-    LXClip clip = getClip(index, false);
+    LXClip clip = getClip(index);
     if (clip != null) {
       this.mutableClips.set(index, null);
       if (this.lx.engine.clips.getFocusedClip() == clip) {
@@ -489,9 +532,11 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
       LX.dispose(effect);
     }
     this.mutableEffects.clear();
+    super.dispose();
+    this.listeners.forEach(listener -> LX.warning("Stranded LXBus.Listener: " + listener));
+    this.clipListeners.forEach(listener -> LX.warning("Stranded LXBus.ClipListener: " + listener));
     this.listeners.clear();
     this.clipListeners.clear();
-    super.dispose();
   }
 
   @Override
@@ -542,10 +587,8 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
 
     // Add the effects
     if (obj.has(KEY_EFFECTS)) {
-      JsonArray effectsArray = obj.getAsJsonArray(KEY_EFFECTS);
-      for (JsonElement effectElement : effectsArray) {
-        JsonObject effectObj = (JsonObject) effectElement;
-        loadEffect(effectObj, -1);
+      for (JsonElement effectElement : obj.getAsJsonArray(KEY_EFFECTS)) {
+        loadEffect(this.lx, (JsonObject) effectElement, -1);
       }
     }
 
@@ -561,21 +604,6 @@ public abstract class LXBus extends LXModelComponent implements LXPresetComponen
     }
 
     super.load(lx, obj);
-  }
-
-  private LXEffect loadEffect(JsonObject effectObj, int index) {
-    String effectClass = effectObj.get("class").getAsString();
-    LXEffect effect;
-    try {
-      effect = this.lx.instantiateEffect(effectClass);
-    } catch (LX.InstantiationException x) {
-      LX.error("Using placeholder class for missing effect: " + effectClass);
-      effect = new LXEffect.Placeholder(this.lx, x);
-      this.lx.pushError(x, effectClass + " could not be loaded. " + x.getMessage());
-    }
-    effect.load(this.lx, effectObj);
-    addEffect(effect, index);
-    return effect;
   }
 
 }

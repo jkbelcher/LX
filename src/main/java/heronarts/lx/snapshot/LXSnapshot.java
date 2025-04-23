@@ -527,6 +527,8 @@ public abstract class LXSnapshot extends LXComponent {
    */
   private final LXComponent snapshotParameterScope;
 
+  private boolean isInitialized = false;
+
   public final BoundedParameter transitionTimeSecs =
     new BoundedParameter("Transition Time", 1, .1, 180)
     .setDescription("Sets the duration of interpolated transitions between snapshots")
@@ -550,15 +552,23 @@ public abstract class LXSnapshot extends LXComponent {
     return null;
   }
 
+  public final void initialize() {
+    if (!this.isInitialized) {
+      initializeViews();
+      this.isInitialized = true;
+    }
+  }
+
   /**
    * Update this snapshot to reflect the current program state
    */
   public void update() {
     clearViews();
-    initialize();
+    initializeViews();
+    this.isInitialized = true;
   }
 
-  public abstract void initialize();
+  protected abstract void initializeViews();
 
   protected void initializeGlobalBus(LXBus bus) {
     if (bus instanceof LXMasterBus) {
@@ -642,6 +652,9 @@ public abstract class LXSnapshot extends LXComponent {
     for (LXLayer layer : device.getLayers()) {
       addLayeredView(scope, layer);
     }
+    for (LXComponent child : device.automationChildren.values()) {
+      addDeviceChildView(scope, child);
+    }
   }
 
   protected void addLayeredView(ViewScope scope, LXLayeredComponent component) {
@@ -652,6 +665,14 @@ public abstract class LXSnapshot extends LXComponent {
     }
     for (LXLayer layer : component.getLayers()) {
       addLayeredView(scope, layer);
+    }
+  }
+
+  protected void addDeviceChildView(ViewScope scope, LXComponent component) {
+    for (LXParameter p : component.getParameters()) {
+      if (p != component.label) {
+        addParameterView(scope, p);
+      }
     }
   }
 
@@ -761,7 +782,6 @@ public abstract class LXSnapshot extends LXComponent {
     super.load(lx, obj);
 
     clearViews();
-
     if (obj.has(KEY_VIEWS)) {
       JsonArray viewsArray = obj.getAsJsonArray(KEY_VIEWS);
       for (JsonElement viewElement : viewsArray) {
@@ -772,6 +792,8 @@ public abstract class LXSnapshot extends LXComponent {
         }
       }
     }
+
+    this.isInitialized = true;
   }
 
 }

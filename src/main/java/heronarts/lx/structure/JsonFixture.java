@@ -44,6 +44,7 @@ import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.MalformedJsonException;
 
 import heronarts.lx.LX;
+import heronarts.lx.LXSerializable;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.model.LXPoint;
 import heronarts.lx.output.ArtSyncDatagram;
@@ -53,9 +54,11 @@ import heronarts.lx.output.LXDatagram;
 import heronarts.lx.output.LXOutput;
 import heronarts.lx.output.LXOutput.GammaTable;
 import heronarts.lx.output.StreamingACNDatagram;
+import heronarts.lx.parameter.AggregateParameter;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.DiscreteParameter;
+import heronarts.lx.parameter.IEnumParameter;
 import heronarts.lx.parameter.LXListenableParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
@@ -130,6 +133,7 @@ public class JsonFixture extends LXFixture {
   private static final String TYPE_POINTS = "points";
   private static final String TYPE_STRIP = "strip";
   private static final String TYPE_ARC = "arc";
+  private static final String TYPE_CLASS = "class";
 
   // Parameters
   private static final String KEY_PARAMETERS = "parameters";
@@ -165,6 +169,7 @@ public class JsonFixture extends LXFixture {
   private static final String KEY_COMPONENT_ID = "componentId";
   private static final String KEY_NUM = "num";
   private static final String KEY_STRIDE = "stride";
+  private static final String KEY_OUTPUT_STRIDE = "outputStride";
   private static final String KEY_PAD_PRE = "padPre";
   private static final String KEY_PAD_POST = "padPost";
   private static final String KEY_REPEAT = "repeat";
@@ -176,6 +181,20 @@ public class JsonFixture extends LXFixture {
 
   // Metadata
   private static final String KEY_META = "meta";
+
+  // UI
+  private static final String KEY_UI = "ui";
+  private static final String KEY_MESH = "mesh";
+  private static final String KEY_MESHES = "meshes";
+  private static final String KEY_MESH_COLOR = "color";
+  private static final String KEY_MESH_FILE = "file";
+  private static final String KEY_MESH_VERTICES = "vertices";
+  private static final String KEY_MESH_RECT_WIDTH = "width";
+  private static final String KEY_MESH_RECT_HEIGHT = "height";
+  private static final String KEY_MESH_RECT_DEPTH = "depth";
+  private static final String KEY_MESH_RECT_AXIS = "axis";
+
+  private static final String MESH_TYPE_UNIFORM_FILL = "uniformFill";
 
   private static final String LABEL_PLACEHOLDER = "UNKNOWN";
 
@@ -340,7 +359,8 @@ public class JsonFixture extends LXFixture {
     POINTS,
     STRIP,
     ARC,
-    JSON
+    JSON,
+    CLASS
   };
 
   public enum ParameterType {
@@ -546,11 +566,12 @@ public class JsonFixture extends LXFixture {
     private final byte[] headerBytes;
     private final byte[] footerBytes;
     private final boolean reverse;
+    private final int outputStride;
 
     // May or may not be specified, if null then the parent output definition is used
     private final JsonByteEncoderDefinition byteEncoder;
 
-    private JsonSegmentDefinition(int start, int num, int stride, int repeat, int padPre, int padPost, boolean reverse, JsonByteEncoderDefinition byteEncoder, byte[] headerBytes, byte[] footerBytes) {
+    private JsonSegmentDefinition(int start, int num, int stride, int repeat, int padPre, int padPost, boolean reverse, JsonByteEncoderDefinition byteEncoder, byte[] headerBytes, byte[] footerBytes, int outputStride) {
       this.start = start;
       this.num = num;
       this.stride = stride;
@@ -561,6 +582,7 @@ public class JsonFixture extends LXFixture {
       this.byteEncoder = byteEncoder;
       this.headerBytes = headerBytes;
       this.footerBytes = footerBytes;
+      this.outputStride = outputStride;
     }
   }
 
@@ -594,6 +616,9 @@ public class JsonFixture extends LXFixture {
   public final List<String> warnings = new CopyOnWriteArrayList<String>();
 
   private final List<JsonOutputDefinition> definedOutputs = new ArrayList<JsonOutputDefinition>();
+
+  private final List<LXModel.Mesh> mutableMeshes = new ArrayList<>();
+  public final List<LXModel.Mesh> meshes = Collections.unmodifiableList(this.mutableMeshes);
 
   private final Map<String, List<LXFixture>> componentsById = new HashMap<String, List<LXFixture>>();
   private final List<List<LXFixture>> componentsByIndex = new ArrayList<List<LXFixture>>();
@@ -715,12 +740,31 @@ public class JsonFixture extends LXFixture {
     this.componentsById.clear();
     this.componentsByIndex.clear();
 
+    // Clear UI meshes
+    this.mutableMeshes.clear();
+
     // Clear transforms
     clearTransforms();
 
     this.isLoaded = false;
     loadFixture(reloadParameters);
     regenerate();
+  }
+
+  private File _getMeshFile(String meshType) {
+    return this.lx.getMediaFile(LX.Media.FIXTURES, meshType.replace(PATH_SEPARATOR, File.separator), false);
+  }
+
+  private File getMeshFile(String meshType) {
+    final String prefix = getChildPrefix();
+    if (prefix != null) {
+      String prefixedType = prefix + PATH_SEPARATOR + meshType;
+      File meshFile = _getMeshFile(prefixedType);
+      if (meshFile.exists()) {
+        return meshFile;
+      }
+    }
+    return _getMeshFile(meshType);
   }
 
   private File getFixtureFile(String fixtureType) {
@@ -773,11 +817,14 @@ public class JsonFixture extends LXFixture {
       // Top level outputs on the entire fixture
       loadOutputs(this, obj);
 
+      // Load UI constructs
+      loadUI(obj);
+
     } catch (JsonParseException jpx) {
       String message = jpx.getLocalizedMessage();
       Throwable cause = jpx.getCause();
       if (cause instanceof MalformedJsonException) {
-        message = "Invalid JSON in " + fixtureFile.getName() + ": " + ((MalformedJsonException)cause).getLocalizedMessage();
+        message = "Invalid JSON in " + fixtureFile.getName() + ": " + cause.getLocalizedMessage();
       }
       setError(jpx, message);
       setErrorLabel(fixtureType);
@@ -1907,6 +1954,67 @@ public class JsonFixture extends LXFixture {
     return arc;
   }
 
+  private LXFixture loadNative(JsonObject nativeObj) {
+    String className = loadString(nativeObj, KEY_CLASS, true, "Fixture type must specify " + KEY_CLASS);
+    if (LXUtils.isEmpty(className)) {
+      addWarning("Fixture type must specify " + KEY_CLASS);
+      return null;
+    }
+
+    try {
+      LXFixture fixture = this.lx.instantiateFixture(className);
+      if (nativeObj.has(KEY_PARAMETERS)) {
+        JsonObject paramsObj = nativeObj.get(KEY_PARAMETERS).getAsJsonObject();
+        fixture.isLoading = true;
+        for (LXParameter parameter : fixture.getParameters()) {
+          if (parameter instanceof AggregateParameter) {
+            // Let this store/restore from the underlying parameter values
+            continue;
+          }
+          final String path = parameter.getPath();
+
+          // Substitute enum/name parameter paths
+          if (parameter instanceof IEnumParameter<?>) {
+            String enumPath = LXSerializable.Utils.getEnumNamePath(path);
+            if (paramsObj.has(enumPath)) {
+              JsonElement enumParam = paramsObj.get(enumPath);
+              if (enumParam.isJsonPrimitive() && enumParam.getAsJsonPrimitive().isString()) {
+                paramsObj.addProperty(enumPath, replaceVariables(enumPath, enumParam.getAsJsonPrimitive().getAsString(), ParameterType.STRING));
+              }
+            }
+          }
+
+          // Substitute variable expressions in string/int/float/boolean values
+          if (paramsObj.has(path)) {
+            JsonElement param = paramsObj.get(path);
+            if (param.isJsonPrimitive() && param.getAsJsonPrimitive().isString()) {
+              String primitive = param.getAsJsonPrimitive().getAsString();
+              if (parameter instanceof StringParameter) {
+                paramsObj.addProperty(path, replaceVariables(path, primitive, ParameterType.STRING));
+              } else if (parameter instanceof BooleanParameter) {
+                boolean boolVal = evaluateBooleanExpression(paramsObj, path, primitive);
+                paramsObj.addProperty(path, boolVal);
+              } else if (parameter instanceof DiscreteParameter) {
+                int intVal = (int) evaluateVariableExpression(paramsObj, path, primitive, ParameterType.INT);
+                paramsObj.addProperty(path, intVal);
+              } else {
+                int floatVal = (int) evaluateVariableExpression(paramsObj, path, primitive, ParameterType.FLOAT);
+                paramsObj.addProperty(path, floatVal);
+              }
+            }
+            LXSerializable.Utils.loadParameter(parameter, paramsObj, path);
+          }
+
+        }
+        fixture.isLoading = false;
+      }
+      return fixture;
+    } catch (Exception x) {
+      addWarning("Failed to load native fixture class " + className + ": " + x.getMessage());
+    }
+    return null;
+  }
+
   private void loadComponents(JsonObject obj) {
     JsonArray componentsArr = loadArray(obj, KEY_COMPONENTS);
     if (componentsArr == null) {
@@ -1974,6 +2082,8 @@ public class JsonFixture extends LXFixture {
         loadChild(childObj, ChildType.STRIP, null);
       } else if (TYPE_ARC.equals(type)) {
         loadChild(childObj, ChildType.ARC, null);
+      } else if (TYPE_CLASS.equals(type)) {
+        loadChild(childObj, ChildType.CLASS, null);
       } else {
         loadChild(childObj, ChildType.JSON, type);
       }
@@ -2006,6 +2116,9 @@ public class JsonFixture extends LXFixture {
       break;
     case ARC:
       child = loadArc(childObj);
+      break;
+    case CLASS:
+      child = loadNative(childObj);
       break;
     case JSON:
       if ((jsonType == null) || jsonType.isEmpty() || jsonType.equals(PATH_SEPARATOR)) {
@@ -2139,9 +2252,10 @@ public class JsonFixture extends LXFixture {
       }
     }
 
-    JsonProtocolDefinition protocol = JsonProtocolDefinition.get(loadString(outputObj, KEY_PROTOCOL, true, "Output must specify a valid " + KEY_PROTOCOL));
+    final String protocolStr = loadString(outputObj, KEY_PROTOCOL, true, "Output must specify a valid " + KEY_PROTOCOL);
+    JsonProtocolDefinition protocol = JsonProtocolDefinition.get(protocolStr);
     if (protocol == null) {
-      addWarning("Output definition must define a valid protocol");
+      addWarning("Output definition must define a valid protocol, not recognized: " + protocolStr);
       return;
     }
 
@@ -2321,7 +2435,7 @@ public class JsonFixture extends LXFixture {
         num += childFixture.totalSize();
       }
       if (offset >= num) {
-        addWarning("Output " + KEY_COMPONENT_INDEX + " start value " + offset + " exceeds size " + num);
+        addWarning("Output " + KEY_COMPONENT_ID + "=" + componentId + " start value " + offset + " exceeds size " + num);
         return;
       }
       start += offset;
@@ -2353,7 +2467,7 @@ public class JsonFixture extends LXFixture {
         num += childFixture.totalSize();
       }
       if (offset >= num) {
-        addWarning("Output " + KEY_COMPONENT_INDEX + " start value " + offset + " exceeds size " + num);
+        addWarning("Output " + KEY_COMPONENT_INDEX + "=" + componentIndex + " start value " + offset + " exceeds size " + num);
         return;
       }
       start += offset;
@@ -2405,6 +2519,17 @@ public class JsonFixture extends LXFixture {
       segmentByteOrder = loadByteOrder(segmentObj, null);
     }
 
+    JsonByteEncoderDefinition byteEncoder = (segmentByteOrder != null) ? segmentByteOrder : outputByteOrder;
+    int outputStride = byteEncoder.byteEncoder.getNumBytes();
+    if (segmentObj.has(KEY_OUTPUT_STRIDE)) {
+      int customStride = loadInt(segmentObj, KEY_OUTPUT_STRIDE, true, "Output " + KEY_OUTPUT_STRIDE + " must be a valid integer");
+      if (customStride < outputStride) {
+        addWarning("Output stride may not be less than byte order size: " + customStride + " < " + outputStride);
+      } else {
+        outputStride = customStride;
+      }
+    }
+
     // The entire segment may be repeated - note that this is different from the basic
     // repeat option which repeats every *pixel* inline. The segment repeat option duplicates
     // output of the entire segment N times.
@@ -2422,7 +2547,7 @@ public class JsonFixture extends LXFixture {
     byte[] footerBytes = loadStaticBytes(segmentObj, KEY_FOOTER_BYTES);
 
     // Duplicate the definition N times (typically 1)
-    final JsonSegmentDefinition segment = new JsonSegmentDefinition(start, num, stride, repeat, padPre, padPost, reverse, segmentByteOrder, headerBytes, footerBytes);
+    final JsonSegmentDefinition segment = new JsonSegmentDefinition(start, num, stride, repeat, padPre, padPost, reverse, segmentByteOrder, headerBytes, footerBytes, outputStride);
     for (int i = 0; i < duplicate; ++i) {
       segments.add(segment);
     }
@@ -2497,6 +2622,258 @@ public class JsonFixture extends LXFixture {
     return byteOrder;
   }
 
+  private void loadUI(JsonObject obj) {
+    if (!obj.has(KEY_UI)) {
+      return;
+    }
+    JsonObject uiObj = obj.get(KEY_UI).getAsJsonObject();
+    if (uiObj.has(KEY_MESH) && uiObj.has(KEY_MESHES)) {
+      addWarning("Should not have both " + KEY_MESH + " and " + KEY_MESHES);
+    }
+
+    if (uiObj.has(KEY_MESH)) {
+      loadUIMesh(uiObj.get(KEY_MESH).getAsJsonObject());
+    }
+    if (uiObj.has(KEY_MESHES)) {
+      JsonArray meshArray = uiObj.get(KEY_MESHES).getAsJsonArray();
+      for (JsonElement meshElem : meshArray) {
+        loadUIMesh(meshElem.getAsJsonObject());
+      }
+    }
+  }
+
+  private void loadUIMesh(JsonObject meshObj) {
+    boolean meshEnabled = true;
+    if (meshObj.has(KEY_ENABLED)) {
+      meshEnabled = loadBoolean(meshObj, KEY_ENABLED, true, KEY_MESH + " property " + KEY_ENABLED + " must be a valid boolean");
+    }
+    if (!meshEnabled) {
+      return;
+    }
+    if (!meshObj.has(KEY_TYPE)) {
+      addWarning("UI mesh must specify " + KEY_TYPE);
+      return;
+    }
+    LXModel.Mesh.Type meshType = null;
+    String meshTypeStr = meshObj.get(KEY_TYPE).getAsString();
+    if (MESH_TYPE_UNIFORM_FILL.equals(meshTypeStr)) {
+      meshType = LXModel.Mesh.Type.UNIFORM_FILL;
+    }
+    if (meshType == null) {
+      addWarning("Unknown mesh type: " + meshTypeStr);
+      return;
+    }
+
+    int meshColor = 0xffffffff;
+    if (meshObj.has(KEY_MESH_COLOR)) {
+      JsonPrimitive meshColorElem = meshObj.get(KEY_MESH_COLOR).getAsJsonPrimitive();
+      if (meshColorElem.isString() && meshColorElem.getAsString().toLowerCase().startsWith("0x")) {
+        meshColor = Integer.parseUnsignedInt(meshColorElem.getAsString().substring(2), 16);
+      } else {
+        meshColor = meshColorElem.getAsInt();
+      }
+    }
+
+    if (meshObj.has(KEY_MESH_VERTICES) && meshObj.has(KEY_MESH_FILE)) {
+      addWarning("UI mesh may not specify both " + KEY_MESH_VERTICES + " and " + KEY_MESH_FILE);
+      return;
+    }
+
+    if (!meshObj.has(KEY_MESH_VERTICES) && !meshObj.has(KEY_MESH_FILE)) {
+      addWarning("UI mesh must specify " + KEY_MESH_VERTICES + " or " + KEY_MESH_FILE);
+      return;
+    }
+
+    if (meshObj.has(KEY_MESH_VERTICES)) {
+      List<LXVector> vertices = new ArrayList<>();
+      JsonArray verticesArr = meshObj.get(KEY_MESH_VERTICES).getAsJsonArray();
+      for (JsonElement vertexElem : verticesArr) {
+        JsonObject vertexObj = vertexElem.getAsJsonObject();
+        if (vertexObj.has(KEY_INSTANCES)) {
+          int numInstances = loadInt(vertexObj, KEY_INSTANCES, true, "Vertex object must specify positive number of instances");
+          if (numInstances <= 0) {
+            addWarning("Vertex specifies illegal number of instances: " + numInstances);
+            return;
+          }
+          if (numInstances >= MAX_INSTANCES) {
+            addWarning("Vertex specifies too many instances: " + numInstances + " >= " + MAX_INSTANCES);
+            return;
+          }
+
+          // Load this child N times with an instance variable set
+          this.currentNumInstances = numInstances;
+          for (int i = 0; i < numInstances; ++i) {
+            this.currentChildInstance = i;
+            JsonObject instanceObj = vertexObj.deepCopy();
+            instanceObj.remove(KEY_INSTANCES);
+            loadUIVertex(instanceObj, vertices);
+          }
+          this.currentNumInstances = -1;
+          this.currentChildInstance = -1;
+        } else {
+          loadUIVertex(vertexObj, vertices);
+        }
+      }
+      if (vertices.isEmpty()) {
+        addWarning("UI mesh object must specify non-empty " + KEY_MESH_VERTICES);
+        return;
+      }
+
+      this.mutableMeshes.add(new LXModel.Mesh(meshType, vertices, meshColor));
+    } else if (meshObj.has(KEY_MESH_FILE)) {
+      final String meshFileStr = meshObj.get(KEY_MESH_FILE).getAsString();
+      final File meshFile = getMeshFile(meshFileStr);
+      if (!meshFile.exists()) {
+        addWarning("Cannot find UI mesh file: " + meshFileStr);
+        return;
+      } else {
+        this.mutableMeshes.add(new LXModel.Mesh(meshType, meshFile, meshColor));
+      }
+    }
+  }
+
+  private enum MeshVertexType {
+    VERTEX,
+    RECT,
+    CUBOID;
+
+    public static MeshVertexType find(String str) {
+      str = str.toUpperCase();
+      for (MeshVertexType candidate : values()) {
+        if (candidate.name().equals(str)) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+  }
+
+  private void loadUIVertex(JsonObject vertexObj, List<LXVector> vertices) {
+    LXVector vertex = loadVector(vertexObj, "Mesh vertex must contain one of x/y/z");
+    MeshVertexType vertexType = MeshVertexType.VERTEX;
+    if (vertexObj.has(KEY_TYPE)) {
+      String typeStr = vertexObj.get(KEY_TYPE).getAsString();
+      vertexType = MeshVertexType.find(typeStr);
+      if (vertexType == null) {
+        addWarning("Unknown mesh vertex type: " + typeStr);
+        return;
+      }
+    }
+    switch (vertexType) {
+      case VERTEX -> vertices.add(vertex);
+      case RECT -> loadUIVertexRect(vertexObj, vertex, vertices);
+      case CUBOID -> loadUIVertexCuboid(vertexObj, vertex, vertices);
+    };
+  }
+
+  private enum MeshRectAxis {
+    XY,
+    XZ,
+    YX,
+    YZ,
+    ZX,
+    ZY;
+
+    public static MeshRectAxis find(String str) {
+      str = str.toUpperCase();
+      for (MeshRectAxis candidate : values()) {
+        if (candidate.name().equals(str)) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+  }
+
+  private void loadUIVertexRect(JsonObject vertexObj, LXVector vertex, List<LXVector> vertices) {
+    final float width = loadFloat(vertexObj, KEY_MESH_RECT_WIDTH, true);
+    final float height = loadFloat(vertexObj, KEY_MESH_RECT_HEIGHT, true);
+    if ((width == 0) || (height == 0)) {
+      addWarning("Mesh vertex type \"rect\" must provide non-zero width/height");
+      return;
+    }
+
+    MeshRectAxis rectAxis = MeshRectAxis.XY;
+    if (vertexObj.has(KEY_MESH_RECT_AXIS)) {
+      String axisStr = vertexObj.get(KEY_MESH_RECT_AXIS).getAsString();
+      rectAxis = MeshRectAxis.find(axisStr);
+      if (rectAxis == null) {
+        addWarning("Unknown mesh rect axis: " + axisStr);
+        return;
+      }
+    }
+    _loadUIVertexRect(vertices, vertex, width, height, rectAxis);
+  }
+
+  private void _loadUIVertexRect(List<LXVector> vertices, LXVector vertex, float width, float height, MeshRectAxis rectAxis) {
+    switch (rectAxis) {
+      case XY -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(width, 0));
+        vertices.add(vertex.copy().add(0, height));
+        vertices.add(vertex.copy().add(0, height));
+        vertices.add(vertex.copy().add(width, 0));
+        vertices.add(vertex.copy().add(width, height));
+      }
+      case XZ -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(width, 0, 0));
+        vertices.add(vertex.copy().add(0, 0, height));
+        vertices.add(vertex.copy().add(0, 0, height));
+        vertices.add(vertex.copy().add(width, 0, 0));
+        vertices.add(vertex.copy().add(width, 0, height));
+      }
+      case YX -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(0, width, 0));
+        vertices.add(vertex.copy().add(height, 0, 0));
+        vertices.add(vertex.copy().add(height, 0, 0));
+        vertices.add(vertex.copy().add(0, width, 0));
+        vertices.add(vertex.copy().add(height, width, 0));
+      }
+      case YZ -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(0, width, 0));
+        vertices.add(vertex.copy().add(0, 0, height));
+        vertices.add(vertex.copy().add(0, 0, height));
+        vertices.add(vertex.copy().add(0, width, 0));
+        vertices.add(vertex.copy().add(0, width, height));
+      }
+      case ZX -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(0, 0, width));
+        vertices.add(vertex.copy().add(height, 0, 0));
+        vertices.add(vertex.copy().add(height, 0, 0));
+        vertices.add(vertex.copy().add(0, 0, width));
+        vertices.add(vertex.copy().add(height, 0, width));
+      }
+      case ZY -> {
+        vertices.add(vertex);
+        vertices.add(vertex.copy().add(0, 0, width));
+        vertices.add(vertex.copy().add(0, height, 0));
+        vertices.add(vertex.copy().add(0, height, 0));
+        vertices.add(vertex.copy().add(0, 0, width));
+        vertices.add(vertex.copy().add(0, height, width));
+      }
+    }
+  }
+
+  private void loadUIVertexCuboid(JsonObject vertexObj, LXVector vertex, List<LXVector> vertices) {
+    final float width = loadFloat(vertexObj, KEY_MESH_RECT_WIDTH, true);
+    final float height = loadFloat(vertexObj, KEY_MESH_RECT_HEIGHT, true);
+    final float depth = loadFloat(vertexObj, KEY_MESH_RECT_DEPTH, true);
+    if ((width == 0) || (height == 0)) {
+      addWarning("Mesh vertex type \"cuboid\" must provide non-zero width/height/depth");
+      return;
+    }
+    _loadUIVertexRect(vertices, vertex, width, height, MeshRectAxis.XY);
+    _loadUIVertexRect(vertices, vertex.copy().add(0, height, 0), width, depth, MeshRectAxis.XZ);
+    _loadUIVertexRect(vertices, vertex.copy().add(0, height, depth), width, -height, MeshRectAxis.XY);
+    _loadUIVertexRect(vertices, vertex.copy().add(0, 0, depth), width, -depth, MeshRectAxis.XZ);
+    _loadUIVertexRect(vertices, vertex.copy().add(0, 0, depth), -depth, height, MeshRectAxis.ZY);
+    _loadUIVertexRect(vertices, vertex.copy().add(width, 0, 0), depth, height, MeshRectAxis.ZY);
+  }
+
   @Override
   protected void buildOutputs() {
     for (JsonOutputDefinition output : this.definedOutputs) {
@@ -2552,7 +2929,8 @@ public class JsonFixture extends LXFixture {
         segment.reverse,
         (segment.byteEncoder != null) ? segment.byteEncoder.byteEncoder : output.byteEncoder.byteEncoder,
         segment.headerBytes,
-        segment.footerBytes
+        segment.footerBytes,
+        segment.outputStride
        ));
     }
 
@@ -2581,6 +2959,11 @@ public class JsonFixture extends LXFixture {
     artSync.setAddress(output.address);
     artSync.framesPerSecond.setValue(output.fps);
     addOutputDirect(artSync);
+  }
+
+  @Override
+  protected List<LXModel.Mesh> getModelMeshes() {
+    return this.meshes;
   }
 
   @Override

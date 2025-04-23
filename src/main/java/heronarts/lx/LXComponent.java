@@ -69,6 +69,17 @@ import heronarts.lx.parameter.StringParameter;
  */
 public abstract class LXComponent implements LXPath, LXParameterListener, LXSerializable {
 
+  /**
+   * An annotation to be applied to classes giving them
+   * a name in the UI different from their classname
+   */
+  @Documented
+  @Target(ElementType.TYPE)
+  @Retention(RetentionPolicy.RUNTIME)
+  public @interface Name {
+    String value();
+  }
+
   @Documented
   @Target(ElementType.TYPE)
   @Retention(RetentionPolicy.RUNTIME)
@@ -85,6 +96,16 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
   @Retention(RetentionPolicy.RUNTIME)
   public @interface Description {
     String value();
+  }
+
+  /**
+   * Specifies that this component requires the given plugin to operate properly
+   */
+  @Documented
+  @Target(ElementType.TYPE)
+  @Retention(RetentionPolicy.RUNTIME)
+  public @interface PluginRequired {
+    Class<? extends LXPlugin> value();
   }
 
   /**
@@ -136,8 +157,14 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
    * An ordered map of array descendants of this component. Rather than a single
    * component, the keys in this map are each a list of components of the same type.
    */
-  private final LinkedHashMap<String, List<? extends LXComponent>> childArrays =
+  private final LinkedHashMap<String, List<? extends LXComponent>> mutableChildArrays =
     new LinkedHashMap<String, List<? extends LXComponent>>();
+
+  /**
+   * An immutable view of the map of child array components
+   */
+  public final Map<String, List<? extends LXComponent>> childArrays =
+    Collections.unmodifiableMap(this.mutableChildArrays);
 
   /**
    * A globally unique identifier for this component. May hold the value
@@ -329,6 +356,10 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
    * @return Name of component type
    */
   public static String getComponentName(Class<? extends LXComponent> component, String suffix) {
+    Name name = component.getAnnotation(Name.class);
+    if (name != null) {
+      return name.value();
+    }
     LXComponentName annotation = component.getAnnotation(LXComponentName.class);
     if (annotation != null) {
       return annotation.value();
@@ -482,7 +513,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       throw new IllegalStateException(
         "Cannot add " + type + " at path " + path + ", child already exists");
     }
-    if (this.childArrays.containsKey(path)) {
+    if (this.mutableChildArrays.containsKey(path)) {
       throw new IllegalStateException(
         "Cannot add " + type + " at path " + path + ", array already exists");
     }
@@ -501,7 +532,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       throw new IllegalStateException("Cannot add null LXComponent.addArray()");
     }
     _checkPath(path, "array");
-    this.childArrays.put(path, childArray);
+    this.mutableChildArrays.put(path, childArray);
     return this;
   }
 
@@ -678,7 +709,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
     }
 
     // Then check for a child array
-    List<? extends LXComponent> array = this.childArrays.get(path);
+    List<? extends LXComponent> array = this.mutableChildArrays.get(path);
     if (array != null) {
       String arrayId = parts[index+1];
       if (arrayId.matches("\\d+")) {
@@ -749,7 +780,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       for (LXComponent child : children) {
         child.oscQuery();
       }
-      for (List<? extends LXComponent> array : this.childArrays.values()) {
+      for (List<? extends LXComponent> array : this.mutableChildArrays.values()) {
         for (LXComponent component : array) {
           if ((component != null) && !children.contains(component)) {
             component.oscQuery();
@@ -784,7 +815,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
         contents.add(childEntry.getKey(), child.toOscQuery());
       }
     }
-    for (Map.Entry<String, List<? extends LXComponent>> childArrayEntry : this.childArrays.entrySet()) {
+    for (Map.Entry<String, List<? extends LXComponent>> childArrayEntry : this.mutableChildArrays.entrySet()) {
       JsonObject arrObj = new JsonObject();
       arrObj.addProperty("FULL_PATH", getCanonicalPath() + "/" + childArrayEntry.getKey());
       arrObj.addProperty("DESCRIPTION", "Container element");
@@ -910,7 +941,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       }
       return child.path(parts, index + 1);
     }
-    List<? extends LXComponent> array = this.childArrays.get(key);
+    List<? extends LXComponent> array = this.mutableChildArrays.get(key);
     if (array != null) {
       ++index;
       if (index < parts.length) {
@@ -1046,6 +1077,12 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       removeParameter(parameter);
     }
     this.parameters.clear();
+
+    // Dispose internal parameters
+    for (LXParameter parameter : this.internalParameters.values()) {
+      parameter.dispose();
+    }
+    this.internalParameters.clear();
 
     // Unset our parent reference and dispose via registry
     this.parent = null;
