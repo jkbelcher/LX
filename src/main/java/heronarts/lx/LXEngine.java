@@ -65,6 +65,22 @@ import com.google.gson.JsonObject;
  */
 public class LXEngine extends LXComponent implements LXOscComponent, LXModulationContainer {
 
+  public enum RenderMode {
+    CPU(true, false),
+    GPU(false, true),
+    MIXED(true, true);
+
+    public final boolean cpu;
+    public final boolean gpu;
+
+    RenderMode(boolean isCPU, boolean isGPU) {
+      this.cpu = isCPU;
+      this.gpu = isGPU;
+    }
+  }
+
+  public RenderMode renderMode = RenderMode.CPU;
+
   public enum ThreadMode {
     SCHEDULED_EXECUTOR_SERVICE,
     BASIC_THREAD_SLEEP,
