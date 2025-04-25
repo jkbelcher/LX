@@ -615,6 +615,11 @@ public class LXModel extends LXNormalizationBounds implements LXSerializable {
     }
   }
 
+  void setNormalizationOrientation(LXModel model) {
+    this.normalizationBounds.setOrientation(model);
+    recomputeGeometry();
+  }
+
   /**
    * Returns the model which defines the space in which this model's points are
    * normalized, based upon the xMin/xMax/xRange etc. By default, this is the
@@ -987,57 +992,68 @@ public class LXModel extends LXNormalizationBounds implements LXSerializable {
 
     boolean firstPoint = true;
     for (LXPoint p : this.points) {
-      ax += p.x;
-      ay += p.y;
-      az += p.z;
+      final float px = this.normalizationBounds.px(p);
+      final float py = this.normalizationBounds.py(p);
+      final float pz = this.normalizationBounds.pz(p);
+      final float pr = (float) Math.sqrt(px*px + py*py + pz*pz);
+
+      ax += px;
+      ay += py;
+      az += pz;
       if (firstPoint) {
-        xMin = xMax = p.x;
-        yMin = yMax = p.y;
-        zMin = zMax = p.z;
+        xMin = xMax = px;
+        yMin = yMax = py;
+        zMin = zMax = pz;
         rMin = rMax = p.r;
         firstPoint = false;
       } else {
-        if (p.x < xMin) {
-          xMin = p.x;
+        if (px < xMin) {
+          xMin = px;
         }
-        if (p.x > xMax) {
-          xMax = p.x;
+        if (px > xMax) {
+          xMax = px;
         }
-        if (p.y < yMin) {
-          yMin = p.y;
+        if (py < yMin) {
+          yMin = py;
         }
-        if (p.y > yMax) {
-          yMax = p.y;
+        if (py > yMax) {
+          yMax = py;
         }
-        if (p.z < zMin) {
-          zMin = p.z;
+        if (pz < zMin) {
+          zMin = pz;
         }
-        if (p.z > zMax) {
-          zMax = p.z;
+        if (pz > zMax) {
+          zMax = pz;
         }
-        if (p.r < rMin) {
-          rMin = p.r;
+        if (pr < rMin) {
+          rMin = pr;
         }
-        if (p.r > rMax) {
-          rMax = p.r;
+        if (pr > rMax) {
+          rMax = pr;
         }
       }
     }
+
     this.ax = ax / Math.max(1, this.points.length);
     this.ay = ay / Math.max(1, this.points.length);
     this.az = az / Math.max(1, this.points.length);
+
     this.xMin = xMin;
     this.xMax = xMax;
     this.xRange = xMax - xMin;
+
     this.yMin = yMin;
     this.yMax = yMax;
     this.yRange = yMax - yMin;
+
     this.zMin = zMin;
     this.zMax = zMax;
     this.zRange = zMax - zMin;
+
     this.rMin = rMin;
     this.rMax = rMax;
     this.rRange = rMax - rMin;
+
     this.cx = xMin + .5f * this.xRange;
     this.cy = yMin + .5f * this.yRange;
     this.cz = zMin + .5f * this.zRange;
