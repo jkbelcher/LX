@@ -67,8 +67,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   public enum RenderMode {
     CPU(true, false),
-    GPU(false, true),
-    MIXED(true, true);
+    GPU(false, true);
 
     public final boolean cpu;
     public final boolean gpu;

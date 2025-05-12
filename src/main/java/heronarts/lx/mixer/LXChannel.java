@@ -985,7 +985,9 @@ public class LXChannel extends LXAbstractChannel {
     // what the mixing mode is, because sub-patterns/effects may render
     // to views that only touch a subset of the channel's view. We don't
     // want to leave old frame cruft in the channel buffer in that case
-    this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    if (this.lx.engine.renderMode.cpu) {
+      this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    }
 
     if (this.compositeMode.getEnum() == CompositeMode.BLEND) {
 
@@ -1005,13 +1007,15 @@ public class LXChannel extends LXAbstractChannel {
         pattern.setBuffer(this.renderBuffer);
         pattern.setModel(patternView);
         pattern.loop(deltaMs);
-        pattern.compositeMode.getObject().blend(
-          this.colors,
-          pattern.getColors(),
-          patternDamping * pattern.compositeLevel.getValue(),
-          this.colors,
-          patternView
-        );
+        if (this.lx.engine.renderMode.cpu) {
+          pattern.compositeMode.getObject().blend(
+            this.colors,
+            pattern.getColors(),
+            patternDamping * pattern.compositeLevel.getValue(),
+            this.colors,
+            patternView
+          );
+        }
       }
 
     } else {
@@ -1059,7 +1063,9 @@ public class LXChannel extends LXAbstractChannel {
         activePattern.loop(deltaMs);
       } else {
         // No active pattern, black it out!
-        this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
+        if (this.lx.engine.renderMode.cpu) {
+          this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
+        }
       }
 
       // Run transition!
@@ -1070,14 +1076,16 @@ public class LXChannel extends LXAbstractChannel {
         nextPattern.setBuffer(this.renderBuffer);
         nextPattern.setModel(nextPattern.getModelView());
         nextPattern.loop(deltaMs);
-        this.transition.loop(deltaMs);
-        this.transition.lerp(
-          this.colors,
-          this.renderBuffer.getArray(),
-          this.transitionProgress,
-          this.colors,
-          getModelView()
-        );
+        if (this.lx.engine.renderMode.cpu) {
+          this.transition.loop(deltaMs);
+          this.transition.lerp(
+            this.colors,
+            this.renderBuffer.getArray(),
+            this.transitionProgress,
+            this.colors,
+            getModelView()
+          );
+        }
       } else {
         this.transitionProgress = 0;
       }
@@ -1087,11 +1095,14 @@ public class LXChannel extends LXAbstractChannel {
 
     // Apply effects
     long effectStart = System.nanoTime();
-    if (!this.mutableEffects.isEmpty()) {
-      for (LXEffect effect : this.mutableEffects) {
-        effect.setBuffer(this.blendBuffer);
-        effect.setModel(effect.getModelView());
-        effect.loop(deltaMs);
+    // Effects are disabled here for GPU mixer mode. They will need an input texture before looping.
+    if (this.lx.engine.renderMode.cpu) {
+      if (!this.mutableEffects.isEmpty()) {
+        for (LXEffect effect : this.mutableEffects) {
+          effect.setBuffer(this.blendBuffer);
+          effect.setModel(effect.getModelView());
+          effect.loop(deltaMs);
+        }
       }
     }
     ((LXBus.Profiler) this.profiler).effectNanos = System.nanoTime() - effectStart;

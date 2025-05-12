@@ -944,7 +944,9 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         // We need to splat the output array right away. Channels may have views applied
         // which mean blend calls might not touch all the pixels. So we've got to get them
         // all re-initted upfront.
-        System.arraycopy(this.destination, 0, this.output, 0, this.destination.length);
+        if (lx.engine.renderMode.cpu) {
+          System.arraycopy(this.destination, 0, this.output, 0, this.destination.length);
+        }
         this.destination = this.output;
       }
     }
@@ -1092,7 +1094,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         if (blendStack != null && channel.enabled.isOn()) {
           double alpha = channel.fader.getValue();
           if (alpha > 0 && this.lx.engine.renderMode.cpu) {
-            //blendStack.blend(channel.blendMode.getObject(), channel.getColors(), alpha, channel.getModelView());
+            blendStack.blend(channel.blendMode.getObject(), channel.getColors(), alpha, channel.getModelView());
           }
         }
       }
@@ -1198,12 +1200,12 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
   private final List<PostMixer> postMixers = new ArrayList<>();
 
-  public void addPostMixer(PostMixer review) {
-    this.postMixers.add(Objects.requireNonNull(review));
+  public void addPostMixer(PostMixer postMixer) {
+    this.postMixers.add(Objects.requireNonNull(postMixer));
   }
 
-  public void removeMixerReview(PostMixer review) {
-    this.postMixers.remove(review);
+  public void removePostMixer(PostMixer postMixer) {
+    this.postMixers.remove(postMixer);
   }
 
   private static final String KEY_CHANNELS = "channels";
