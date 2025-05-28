@@ -1077,18 +1077,18 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
         // Which output group is this channel mapped to
         switch (channel.crossfadeGroup.getEnum()) {
-          case A:
-            leftExists = true;
-            blendStack = blendLeft ? this.blendStackLeft : null;
-            break;
-          case B:
-            rightExists = true;
-            blendStack = blendRight ? this.blendStackRight : null;
-            break;
-          default:
-          case BYPASS:
-            blendStack = blendStackMain;
-            break;
+        case A:
+          leftExists = true;
+          blendStack = blendLeft ? this.blendStackLeft : null;
+          break;
+        case B:
+          rightExists = true;
+          blendStack = blendRight ? this.blendStackRight : null;
+          break;
+        default:
+        case BYPASS:
+          blendStack = blendStackMain;
+          break;
         }
 
         if (blendStack != null && channel.enabled.isOn()) {
