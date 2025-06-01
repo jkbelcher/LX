@@ -164,7 +164,9 @@ public class GridFixture extends LXBasicFixture {
 
     for (int r = 0; r < numRows; ++r) {
       metaData.put("rowIndex", String.valueOf(r));
-      submodels[i++] = new Submodel(r * numColumns, numColumns, 1, metaData, rowTags);
+      submodels[i] = new Submodel(r * numColumns, numColumns, 1, metaData, rowTags);
+      submodels[i].transform.translate(0, r * this.rowSpacing.getValuef(), 0);
+      ++i;
     }
 
     metaData.clear();
@@ -172,7 +174,9 @@ public class GridFixture extends LXBasicFixture {
     metaData.put("spacing", String.valueOf(this.rowSpacing.getValue()));
     for (int c = 0; c < numColumns; ++c) {
       metaData.put("columnIndex", String.valueOf(c));
-      submodels[i++] = new Submodel(c, numRows, numColumns, metaData, columnTags);
+      submodels[i] = new Submodel(c, numRows, numColumns, metaData, columnTags);
+      submodels[i].transform.translate(c * this.columnSpacing.getValuef(), 0, 0);
+      ++i;
     }
 
     return submodels;
@@ -194,11 +198,15 @@ public class GridFixture extends LXBasicFixture {
     int numColumns = this.numColumns.getValuei();
     float rowSpacing = this.rowSpacing.getValuef();
     float columnSpacing = this.columnSpacing.getValuef();
+
     int pi = 0;
     for (int r = 0; r < numRows; ++r) {
       transform.push();
       for (int c = 0; c < numColumns; ++c) {
-        points.get(pi++).set(transform);
+        final LXPoint p = points.get(pi++);
+        p.set(transform);
+        // TODO(normals): may need inv/transpose if matrix isn't orthonormal w/ uniform scale...
+        p.setNormal(-matrix.m13, -matrix.m23, -matrix.m33);
         transform.translateX(columnSpacing);
       }
       transform.pop();

@@ -49,6 +49,7 @@ import heronarts.lx.osc.LXOscEngine;
 import heronarts.lx.osc.OscArgument;
 import heronarts.lx.osc.OscInt;
 import heronarts.lx.osc.OscMessage;
+import heronarts.lx.osc.OscRgba;
 import heronarts.lx.parameter.AggregateParameter;
 import heronarts.lx.parameter.BooleanParameter;
 import heronarts.lx.parameter.BoundedParameter;
@@ -739,7 +740,7 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
     } else if (parameter instanceof StringParameter) {
       ((StringParameter) parameter).setValue(message.getString());
     } else if (parameter instanceof AggregateParameter) {
-      if (parts.length >= index + 1) {
+      if (parts.length > index + 1) {
         LXParameter subparameter = ((AggregateParameter) parameter).subparameters.get(parts[index+1]);
         if (subparameter != null) {
           return handleOscParameter(message, subparameter, parts, index+1);
@@ -747,8 +748,13 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
           LXOscEngine.error("Component " + this + " did not find anything at OSC path: " + path + " (" + message + ")");
           return false;
         }
-      } else if (parameter instanceof ColorParameter) {
-        ((ColorParameter) parameter).setColor(message.getInt());
+      } else if (parameter instanceof ColorParameter color) {
+        final OscArgument arg = message.get();
+        if (arg instanceof OscRgba rgba) {
+          color.setColor(rgba.toARGB());
+        } else {
+          color.setColor(arg.toInt());
+        }
       }
     } else if (parameter instanceof DiscreteParameter) {
       OscArgument arg = message.get();
@@ -1067,10 +1073,13 @@ public abstract class LXComponent implements LXPath, LXParameterListener, LXSeri
       parent = parent.getParent();
     }
 
-    // The global midi, modulation, and snapshot engines need to know we're gone
+    // The global midi, modulation, snapshot, remote control engines need to know we're gone
     this.lx.engine.midi.removeMappings(this);
     this.lx.engine.modulation.removeModulations(this);
     this.lx.engine.snapshots.removeSnapshotViews(this);
+    if (isDescendant(this.lx.engine.mixer)) {
+      this.lx.engine.mixer.removeRemoteControls(this);
+    }
 
     // Remove all of the parameters
     for (LXParameter parameter : new ArrayList<LXParameter>(this.parameters.values())) {

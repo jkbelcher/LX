@@ -195,7 +195,7 @@ public class LXOscEngine extends LXComponent {
     private void register(int port) {
       unregister();
       try {
-        log("Registering zeroconf OSC services on port " + port);
+        log("Registering zeroconf OSC services on " + this.jmdns.getInetAddress() + " port " + port);
         this.jmdns.registerService(ServiceInfo.create(
           "_osc._udp.local.",
           this.serviceName + ":" + port,
@@ -224,10 +224,14 @@ public class LXOscEngine extends LXComponent {
         // NOTE(mcslee): horrible hack here... firing this off on a separate thread
         // because this call can unfortunately block for many seconds
         new Thread(() -> {
+          InetAddress address = null;
+          try { address = this.jmdns.getInetAddress(); }  catch (IOException ignored) {}
           if (registered) {
+            log("Unregistering zeroconf OSC services on " + address);
             this.jmdns.unregisterAllServices();
           }
           if (close) {
+            log("Closing zeroconf " + address);
             try {
               this.jmdns.close();
             } catch (IOException iox) {
@@ -404,7 +408,7 @@ public class LXOscEngine extends LXComponent {
           throw new OscException();
         }
       } catch (Exception x) {
-        error("Failed to handle OSC message: " + message.getAddressPattern().getValue());
+        error("Failed to handle OSC message: " + message);
       }
 
       // Dispatch to custom listeners
@@ -498,6 +502,7 @@ public class LXOscEngine extends LXComponent {
     private final OscMessage oscMessage = new OscMessage("");
     private final OscFloat oscFloat = new OscFloat(0);
     private final OscInt oscInt = new OscInt(0);
+    private final OscRgba oscRgba = new OscRgba(0);
     private final OscString oscString = new OscString("");
 
     void setConnection(LXOscConnection connection) {
@@ -545,8 +550,8 @@ public class LXOscEngine extends LXComponent {
         oscString.setValue(string.getString());
         oscMessage.add(oscString);
       } else if (parameter instanceof ColorParameter color) {
-        oscInt.setValue(color.getBaseColor());
-        oscMessage.add(oscInt);
+        oscRgba.setARGB(color.getBaseColor());
+        oscMessage.add(oscRgba);
       } else if (parameter instanceof DiscreteParameter discrete) {
         oscInt.setValue(discrete.getBaseValuei());
         oscMessage.add(oscInt);
@@ -853,11 +858,12 @@ public class LXOscEngine extends LXComponent {
     if (this.engineReceiver != null) {
       stopReceiver(IOState.STOPPED);
     }
-    String host = this.receiveHost.getString();
-    int port = this.receivePort.getValuei();
+    final String host = this.receiveHost.getString();
+    final int port = this.receivePort.getValuei();
     try {
+      final InetAddress addr = InetAddress.getByName(host);
       this.receiveState.setValue(IOState.BINDING);
-      this.engineReceiver = receiver(port, host);
+      this.engineReceiver = receiver(port, addr);
       this.engineReceiver.setLog(this.logInput);
       this.engineReceiver.setActivity(this.receiveActivity);
       this.engineReceiver.addListener(this.engineListener);
@@ -865,7 +871,7 @@ public class LXOscEngine extends LXComponent {
       this.receiveState.setValue(IOState.BOUND);
       log("Started OSC listener " + this.engineReceiver.address);
       if (this.oscQueryServer != null) {
-        this.oscQueryServer.bind(port);
+        this.oscQueryServer.bind(addr, port);
       }
       if (this.zeroconf != null) {
         this.zeroconf.register(port);

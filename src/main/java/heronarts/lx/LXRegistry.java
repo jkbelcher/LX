@@ -32,9 +32,7 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -130,6 +128,7 @@ public class LXRegistry implements LXSerializable {
   static {
     DEFAULT_PATTERNS = new ArrayList<Class<? extends LXPattern>>();
     DEFAULT_PATTERNS.add(heronarts.lx.dmx.DmxPattern.class);
+    DEFAULT_PATTERNS.add(heronarts.lx.pattern.PatternRack.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.audio.SoundObjectPattern.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.color.GradientPattern.class);
     DEFAULT_PATTERNS.add(heronarts.lx.pattern.color.SolidPattern.class);
@@ -149,6 +148,7 @@ public class LXRegistry implements LXSerializable {
     DEFAULT_EFFECTS.add(heronarts.lx.effect.color.ColorizeEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.color.ColorMaskEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.color.GradientMaskEffect.class);
+    DEFAULT_EFFECTS.add(heronarts.lx.effect.color.TransparifyEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.DynamicsEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.InvertEffect.class);
     DEFAULT_EFFECTS.add(heronarts.lx.effect.HueSaturationEffect.class);
@@ -558,8 +558,14 @@ public class LXRegistry implements LXSerializable {
   }
 
   public void reloadContent() {
+    reloadContent(true);
+  }
+
+  private void reloadContent(boolean disposeClassLoader) {
     LX.log("Reloading custom content folders");
-    this.classLoader.dispose();
+    if (disposeClassLoader) {
+      this.classLoader.dispose();
+    }
     this.mutablePackages.clear();
     this.mutablePlugins.clear();
 
@@ -618,10 +624,14 @@ public class LXRegistry implements LXSerializable {
       return false;
     }
     try {
+      // Close the classloader first, otherwise on Windows it may hold handles to
+      // destinationFile and bork the Files.copy() call
+      this.classLoader.dispose();
       Files.copy(file.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
       installPackageMedia(destinationFile);
-      reloadContent();
+      reloadContent(false);
     } catch (Throwable x) {
+      LX.error(x, "Error installing package file " + file.getName() + ": " + x.getLocalizedMessage());
       this.lx.pushError(x, "Error installing package file " + file.getName() + ": " + x.getLocalizedMessage());
       return false;
     }
@@ -651,7 +661,7 @@ public class LXRegistry implements LXSerializable {
       while (entries.hasMoreElements()) {
         final JarEntry entry = entries.nextElement();
         final String fileName = entry.getName();
-        if (fileName.startsWith("fixtures/") && fileName.endsWith(".lxf")) {
+        if (fileName.startsWith("fixtures/") && !entry.isDirectory()) {
           copyPackageMedia(packageDir, LX.Media.FIXTURES, jarFile, entry);
         } else if (fileName.startsWith("models/") && fileName.endsWith(".lxm")) {
           copyPackageMedia(packageDir, LX.Media.MODELS, jarFile, entry);
@@ -756,6 +766,10 @@ public class LXRegistry implements LXSerializable {
   }
 
   public void uninstallPackage(LXClassLoader.Package pack) {
+    uninstallPackage(pack, true);
+  }
+
+  public void uninstallPackage(LXClassLoader.Package pack, boolean reload) {
     File destinationFile = lx.getMediaFile(LX.Media.DELETED, pack.jarFile.getName(), true);
     try {
       if (destinationFile.exists()) {
@@ -765,10 +779,31 @@ public class LXRegistry implements LXSerializable {
         destinationFile = lx.getMediaFile(LX.Media.DELETED, pack.jarFile.getName() + "-" + suffix, true);
       }
       Files.move(pack.jarFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-      reloadContent();
+      if (reload) {
+        reloadContent();
+      }
     } catch (IOException iox) {
+      LX.error(iox, "Could not remove package file " + pack.jarFile.getName());
       this.lx.pushError(iox, "Could not remove package file " + pack.jarFile.getName());
     }
+  }
+
+  /**
+   * Find a package that matches the package name in the given file
+   *
+   * @param file Package file
+   * @return Existing package which matches, or null if none exists
+   */
+  public LXClassLoader.Package findPackage(File file) {
+    final String packageName = this.classLoader.loadPackageName(file);
+    if (packageName != null) {
+      for (LXClassLoader.Package pkg : this.packages) {
+        if (packageName.equals(pkg.getName())) {
+          return pkg;
+        }
+      }
+    }
+    return null;
   }
 
   public enum ComponentType {
@@ -796,19 +831,7 @@ public class LXRegistry implements LXSerializable {
     return null;
   }
 
-  private final Map<String, LXClassLoader.Package> duplicates = new HashMap<String, LXClassLoader.Package>();
-
   protected void addClass(Class<?> clz, LXClassLoader.Package pack) {
-    final String className = clz.getName();
-    final LXClassLoader.Package duplicate = duplicates.get(className);
-    if (duplicate != null) {
-      String thisFile = lx.getMediaPath(LX.Media.PACKAGES, pack.jarFile);
-      String originalFile = lx.getMediaPath(LX.Media.PACKAGES, duplicate.jarFile);
-      LX.error("Ignoring duplicate class: " + className + " in " + thisFile + " + " + originalFile);
-      return;
-    }
-    this.duplicates.put(className, pack);
-
     if (LXPattern.class.isAssignableFrom(clz)) {
       addPattern(clz.asSubclass(LXPattern.class));
     }
@@ -827,8 +850,6 @@ public class LXRegistry implements LXSerializable {
   }
 
   protected void removeClass(Class<?> clz) {
-    this.duplicates.remove(clz.getName());
-
     if (LXPattern.class.isAssignableFrom(clz)) {
       removePattern(clz.asSubclass(LXPattern.class));
     }

@@ -97,6 +97,7 @@ public class JsonFixture extends LXFixture {
   private static final String KEY_SCALE_Y = "scaleY";
   private static final String KEY_SCALE_Z = "scaleZ";
   private static final String KEY_SCALE = "scale";
+  private static final String KEY_POINT_SIZE = "pointSize";
   private static final String KEY_DIRECTION = "direction";
   private static final String KEY_NORMAL = "normal";
   private static final String KEY_END = "end";
@@ -187,14 +188,26 @@ public class JsonFixture extends LXFixture {
   private static final String KEY_MESH = "mesh";
   private static final String KEY_MESHES = "meshes";
   private static final String KEY_MESH_COLOR = "color";
+  private static final String KEY_MESH_TEXTURE = "texture";
   private static final String KEY_MESH_FILE = "file";
   private static final String KEY_MESH_VERTICES = "vertices";
+  private static final String KEY_MESH_INVERT_NORMALS = "invertNormals";
   private static final String KEY_MESH_RECT_WIDTH = "width";
   private static final String KEY_MESH_RECT_HEIGHT = "height";
   private static final String KEY_MESH_RECT_DEPTH = "depth";
   private static final String KEY_MESH_RECT_AXIS = "axis";
 
+  private static final String KEY_MESH_LIGHTING = "lighting";
+  private static final String KEY_MESH_LIGHTING_COLOR = "color";
+  private static final String KEY_MESH_LIGHTING_DIRECTION = "direction";
+  private static final String KEY_MESH_LIGHTING_AMBIENT = "ambient";
+  private static final String KEY_MESH_LIGHTING_DIFFUSE = "diffuse";
+  private static final String KEY_MESH_LIGHTING_SPECULAR = "specular";
+  private static final String KEY_MESH_LIGHTING_SHININESS = "shininess";
+
   private static final String MESH_TYPE_UNIFORM_FILL = "uniformFill";
+  private static final String MESH_TYPE_TEXTURE_2D = "texture2d";
+  private static final String MESH_TYPE_PHONG = "phong";
 
   private static final String LABEL_PLACEHOLDER = "UNKNOWN";
 
@@ -470,6 +483,7 @@ public class JsonFixture extends LXFixture {
     private ParameterDefinition(String name, String label, String description, float value, float defaultFloat, float minFloat, float maxFloat) {
       this(name, label, description, ParameterType.FLOAT,
         (BoundedParameter) new BoundedParameter(label, defaultFloat, minFloat, maxFloat)
+        .setFormatter(LXParameter.Formatter.DECIMAL_2_TO_8_PLACES)
         .setValue(value)
       );
     }
@@ -793,7 +807,7 @@ public class JsonFixture extends LXFixture {
 
       if (loadParameters) {
         loadLabel(obj);
-        loadTags(this, obj, true, true, false);
+        loadTags(this, obj, true, false);
         loadParameters(obj);
         this.parametersReloaded.bang();
       }
@@ -987,7 +1001,10 @@ public class JsonFixture extends LXFixture {
     deg(f -> { return (float) Math.toDegrees(f); }),
     rad(f -> { return (float) Math.toRadians(f); }),
     abs(f -> { return Math.abs(f); }),
-    sqrt(f -> { return (float) Math.sqrt(f); });
+    sqrt(f -> { return (float) Math.sqrt(f); }),
+    floor(f -> { return (float) Math.floor(f); }),
+    ceil(f -> { return (float) Math.ceil(f); }),
+    round(f -> { return Math.round(f); });
 
     private interface Compute {
       public float compute(float f);
@@ -1238,6 +1255,15 @@ public class JsonFixture extends LXFixture {
     return 0;
   }
 
+  private int loadColor(JsonObject obj, String key) {
+    JsonPrimitive colorElem = obj.get(key).getAsJsonPrimitive();
+    if (colorElem.isString() && colorElem.getAsString().toLowerCase().startsWith("0x")) {
+      return Integer.parseUnsignedInt(colorElem.getAsString().substring(2), 16);
+    } else {
+      return colorElem.getAsInt();
+    }
+  }
+
   private LXVector loadVector(JsonObject obj, String warning) {
     if (!obj.has(KEY_X) && !obj.has(KEY_Y) && !obj.has(KEY_Z)) {
       addWarning(warning);
@@ -1312,6 +1338,10 @@ public class JsonFixture extends LXFixture {
     }
     if (obj.has(KEY_SCALE)) {
       fixture.scale.setValue(loadFloat(obj, KEY_SCALE, true));
+    }
+    if (obj.has(KEY_POINT_SIZE)) {
+      fixture.hasCustomPointSize.setValue(true);
+      fixture.pointSize.setValue(loadFloat(obj, KEY_POINT_SIZE, true));
     }
   }
 
@@ -1472,10 +1502,10 @@ public class JsonFixture extends LXFixture {
     }
   }
 
-  private void loadTags(LXFixture fixture, JsonObject obj, boolean required, boolean includeParent, boolean replaceVariables) {
-    List<String> validTags = _loadTags(obj, required, replaceVariables, this);
+  private void loadTags(LXFixture fixture, JsonObject obj, boolean includeParent, boolean replaceVariables) {
+    List<String> validTags = _loadTags(obj, replaceVariables, this);
     if (includeParent) {
-      for (String tag : _loadTags(this.jsonParameterValues, false, true, this.jsonParameterContext)) {
+      for (String tag : _loadTags(this.jsonParameterValues, true, this.jsonParameterContext)) {
         if (validTags.contains(tag)) {
           addWarning("Parent JSON fixture redundantly specifies tag: " + tag);
         } else {
@@ -1486,7 +1516,7 @@ public class JsonFixture extends LXFixture {
     fixture.setTags(validTags);
   }
 
-  private List<String> _loadTags(JsonObject obj, boolean required, boolean replaceVariables, JsonFixture variableContext) {
+  private List<String> _loadTags(JsonObject obj, boolean replaceVariables, JsonFixture variableContext) {
     warnDuplicateKeys(obj, KEY_MODEL_KEY, KEY_MODEL_KEYS, KEY_TAG, KEY_TAGS);
     String keyTags = obj.has(KEY_TAGS) ? KEY_TAGS : KEY_MODEL_KEYS;
     String keyTag = obj.has(KEY_TAG) ? KEY_TAG : KEY_MODEL_KEY;
@@ -1530,8 +1560,6 @@ public class JsonFixture extends LXFixture {
           validTags.add(tag);
         }
       }
-    } else if (required) {
-      addWarning("Fixture definition must specify one of " + KEY_TAG + "/" + KEY_TAGS);
     }
 
     return validTags;
@@ -2164,7 +2192,7 @@ public class JsonFixture extends LXFixture {
 
       // Load tags for non-JSON child types
       if (type != ChildType.JSON) {
-        loadTags(child, childObj, false, false, true);
+        loadTags(child, childObj, false, true);
       }
 
       // Load meta-data fields for the child
@@ -2658,6 +2686,10 @@ public class JsonFixture extends LXFixture {
     String meshTypeStr = meshObj.get(KEY_TYPE).getAsString();
     if (MESH_TYPE_UNIFORM_FILL.equals(meshTypeStr)) {
       meshType = LXModel.Mesh.Type.UNIFORM_FILL;
+    } else if (MESH_TYPE_TEXTURE_2D.equals(meshTypeStr)) {
+      meshType = LXModel.Mesh.Type.TEXTURE_2D;
+    } else if (MESH_TYPE_PHONG.equals(meshTypeStr)) {
+      meshType = LXModel.Mesh.Type.PHONG;
     }
     if (meshType == null) {
       addWarning("Unknown mesh type: " + meshTypeStr);
@@ -2666,12 +2698,35 @@ public class JsonFixture extends LXFixture {
 
     int meshColor = 0xffffffff;
     if (meshObj.has(KEY_MESH_COLOR)) {
-      JsonPrimitive meshColorElem = meshObj.get(KEY_MESH_COLOR).getAsJsonPrimitive();
-      if (meshColorElem.isString() && meshColorElem.getAsString().toLowerCase().startsWith("0x")) {
-        meshColor = Integer.parseUnsignedInt(meshColorElem.getAsString().substring(2), 16);
-      } else {
-        meshColor = meshColorElem.getAsInt();
+      meshColor = loadColor(meshObj, KEY_MESH_COLOR);
+    }
+
+    LXModel.Mesh.Lighting meshLighting = LXModel.Mesh.Lighting.DEFAULT;
+    int meshLightColor = 0xffffffff;
+    LXModel.Mesh.Vertex meshLightDirection = new LXModel.Mesh.Vertex(0, 0, 1);
+    if (meshObj.has(KEY_MESH_LIGHTING)) {
+      final JsonObject meshLightingObj = meshObj.get(KEY_MESH_LIGHTING).getAsJsonObject();
+      meshLighting = new LXModel.Mesh.Lighting(
+        loadFloat(meshLightingObj, KEY_MESH_LIGHTING_AMBIENT, true),
+        loadFloat(meshLightingObj, KEY_MESH_LIGHTING_DIFFUSE, true),
+        loadFloat(meshLightingObj, KEY_MESH_LIGHTING_SPECULAR, true),
+        loadFloat(meshLightingObj, KEY_MESH_LIGHTING_SHININESS, true)
+      );
+      if (meshLightingObj.has(KEY_MESH_LIGHTING_COLOR)) {
+        meshLightColor = loadColor(meshLightingObj, KEY_MESH_LIGHTING_COLOR);
       }
+      if (meshLightingObj.has(KEY_MESH_LIGHTING_DIRECTION)) {
+        JsonObject meshLightingDirectionObj = meshLightingObj.get(KEY_MESH_LIGHTING_DIRECTION).getAsJsonObject();
+        float x = loadFloat(meshLightingDirectionObj, KEY_X, true);
+        float y = loadFloat(meshLightingDirectionObj, KEY_Y, true);
+        float z = loadFloat(meshLightingDirectionObj, KEY_Z, true);
+        meshLightDirection = new LXModel.Mesh.Vertex(x, y, z);
+      }
+    }
+
+    File meshTexture = null;
+    if (meshObj.has(KEY_MESH_TEXTURE)) {
+      meshTexture = getMeshFile(meshObj.get(KEY_MESH_TEXTURE).getAsString());
     }
 
     if (meshObj.has(KEY_MESH_VERTICES) && meshObj.has(KEY_MESH_FILE)) {
@@ -2684,8 +2739,10 @@ public class JsonFixture extends LXFixture {
       return;
     }
 
+    LXModel.Mesh mesh = null;
+
     if (meshObj.has(KEY_MESH_VERTICES)) {
-      List<LXVector> vertices = new ArrayList<>();
+      LXModel.Mesh.VertexList vertices = new LXModel.Mesh.VertexList();
       JsonArray verticesArr = meshObj.get(KEY_MESH_VERTICES).getAsJsonArray();
       for (JsonElement vertexElem : verticesArr) {
         JsonObject vertexObj = vertexElem.getAsJsonObject();
@@ -2718,17 +2775,23 @@ public class JsonFixture extends LXFixture {
         addWarning("UI mesh object must specify non-empty " + KEY_MESH_VERTICES);
         return;
       }
-
-      this.mutableMeshes.add(new LXModel.Mesh(meshType, vertices, meshColor));
+      mesh = new LXModel.Mesh(meshType, vertices, meshColor, meshTexture);
     } else if (meshObj.has(KEY_MESH_FILE)) {
       final String meshFileStr = meshObj.get(KEY_MESH_FILE).getAsString();
       final File meshFile = getMeshFile(meshFileStr);
       if (!meshFile.exists()) {
         addWarning("Cannot find UI mesh file: " + meshFileStr);
-        return;
       } else {
-        this.mutableMeshes.add(new LXModel.Mesh(meshType, meshFile, meshColor));
+        mesh = new LXModel.Mesh(meshType, meshFile, meshColor);
       }
+    }
+
+    if (mesh != null) {
+      mesh.setLighting(meshLighting);
+      mesh.setLightColor(meshLightColor);
+      mesh.setLightDirection(meshLightDirection);
+      mesh.invertNormals = loadBoolean(meshObj, KEY_MESH_INVERT_NORMALS, true, "Mesh must specify valid boolean for " + KEY_MESH_INVERT_NORMALS);
+      this.mutableMeshes.add(mesh);
     }
   }
 
@@ -2748,8 +2811,11 @@ public class JsonFixture extends LXFixture {
     }
   }
 
-  private void loadUIVertex(JsonObject vertexObj, List<LXVector> vertices) {
-    LXVector vertex = loadVector(vertexObj, "Mesh vertex must contain one of x/y/z");
+  private void loadUIVertex(JsonObject vertexObj, LXModel.Mesh.VertexList vertices) {
+    LXVector vector = loadVector(vertexObj, "Mesh vertex must specify at least one of x/y/z");
+    final float u = loadFloat(vertexObj, "u", true);
+    final float v = loadFloat(vertexObj, "v", true);
+
     MeshVertexType vertexType = MeshVertexType.VERTEX;
     if (vertexObj.has(KEY_TYPE)) {
       String typeStr = vertexObj.get(KEY_TYPE).getAsString();
@@ -2760,9 +2826,9 @@ public class JsonFixture extends LXFixture {
       }
     }
     switch (vertexType) {
-      case VERTEX -> vertices.add(vertex);
-      case RECT -> loadUIVertexRect(vertexObj, vertex, vertices);
-      case CUBOID -> loadUIVertexCuboid(vertexObj, vertex, vertices);
+      case VERTEX -> vertices.add(new LXModel.Mesh.Vertex(vector.x, vector.y, vector.z, u, v));
+      case RECT -> loadUIVertexRect(vertexObj, vector, vertices);
+      case CUBOID -> loadUIVertexCuboid(vertexObj, vector, vertices);
     };
   }
 
@@ -2785,7 +2851,7 @@ public class JsonFixture extends LXFixture {
     }
   }
 
-  private void loadUIVertexRect(JsonObject vertexObj, LXVector vertex, List<LXVector> vertices) {
+  private void loadUIVertexRect(JsonObject vertexObj, LXVector vertex, LXModel.Mesh.VertexList vertices) {
     final float width = loadFloat(vertexObj, KEY_MESH_RECT_WIDTH, true);
     final float height = loadFloat(vertexObj, KEY_MESH_RECT_HEIGHT, true);
     if ((width == 0) || (height == 0)) {
@@ -2805,60 +2871,60 @@ public class JsonFixture extends LXFixture {
     _loadUIVertexRect(vertices, vertex, width, height, rectAxis);
   }
 
-  private void _loadUIVertexRect(List<LXVector> vertices, LXVector vertex, float width, float height, MeshRectAxis rectAxis) {
+  private void _loadUIVertexRect(LXModel.Mesh.VertexList vertices, LXVector vertex, float width, float height, MeshRectAxis rectAxis) {
     switch (rectAxis) {
       case XY -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(width, 0));
-        vertices.add(vertex.copy().add(0, height));
-        vertices.add(vertex.copy().add(0, height));
-        vertices.add(vertex.copy().add(width, 0));
-        vertices.add(vertex.copy().add(width, height));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(width, 0), 1, 1);
+        vertices.add(vertex.copy().add(0, height), 0, 0);
+        vertices.add(vertex.copy().add(0, height), 0, 0);
+        vertices.add(vertex.copy().add(width, 0), 1, 1);
+        vertices.add(vertex.copy().add(width, height), 1, 0);
       }
       case XZ -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(width, 0, 0));
-        vertices.add(vertex.copy().add(0, 0, height));
-        vertices.add(vertex.copy().add(0, 0, height));
-        vertices.add(vertex.copy().add(width, 0, 0));
-        vertices.add(vertex.copy().add(width, 0, height));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(width, 0, 0), 1, 1);
+        vertices.add(vertex.copy().add(0, 0, height), 0, 0);
+        vertices.add(vertex.copy().add(0, 0, height), 0, 0);
+        vertices.add(vertex.copy().add(width, 0, 0), 1, 1);
+        vertices.add(vertex.copy().add(width, 0, height), 1, 0);
       }
       case YX -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(0, width, 0));
-        vertices.add(vertex.copy().add(height, 0, 0));
-        vertices.add(vertex.copy().add(height, 0, 0));
-        vertices.add(vertex.copy().add(0, width, 0));
-        vertices.add(vertex.copy().add(height, width, 0));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(0, width, 0), 1, 1);
+        vertices.add(vertex.copy().add(height, 0, 0), 0, 0);
+        vertices.add(vertex.copy().add(height, 0, 0), 0, 0);
+        vertices.add(vertex.copy().add(0, width, 0), 1, 1);
+        vertices.add(vertex.copy().add(height, width, 0), 1, 0);
       }
       case YZ -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(0, width, 0));
-        vertices.add(vertex.copy().add(0, 0, height));
-        vertices.add(vertex.copy().add(0, 0, height));
-        vertices.add(vertex.copy().add(0, width, 0));
-        vertices.add(vertex.copy().add(0, width, height));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(0, width, 0), 1, 1);
+        vertices.add(vertex.copy().add(0, 0, height), 0, 0);
+        vertices.add(vertex.copy().add(0, 0, height), 0, 0);
+        vertices.add(vertex.copy().add(0, width, 0), 1, 1);
+        vertices.add(vertex.copy().add(0, width, height), 1, 0);
       }
       case ZX -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(0, 0, width));
-        vertices.add(vertex.copy().add(height, 0, 0));
-        vertices.add(vertex.copy().add(height, 0, 0));
-        vertices.add(vertex.copy().add(0, 0, width));
-        vertices.add(vertex.copy().add(height, 0, width));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(0, 0, width), 1, 1);
+        vertices.add(vertex.copy().add(height, 0, 0), 0, 0);
+        vertices.add(vertex.copy().add(height, 0, 0), 0, 0);
+        vertices.add(vertex.copy().add(0, 0, width), 1, 1);
+        vertices.add(vertex.copy().add(height, 0, width), 1, 0);
       }
       case ZY -> {
-        vertices.add(vertex);
-        vertices.add(vertex.copy().add(0, 0, width));
-        vertices.add(vertex.copy().add(0, height, 0));
-        vertices.add(vertex.copy().add(0, height, 0));
-        vertices.add(vertex.copy().add(0, 0, width));
-        vertices.add(vertex.copy().add(0, height, width));
+        vertices.add(vertex, 0, 1);
+        vertices.add(vertex.copy().add(0, 0, width), 1, 1);
+        vertices.add(vertex.copy().add(0, height, 0), 0, 0);
+        vertices.add(vertex.copy().add(0, height, 0), 0, 0);
+        vertices.add(vertex.copy().add(0, 0, width), 1, 1);
+        vertices.add(vertex.copy().add(0, height, width), 1, 0);
       }
     }
   }
 
-  private void loadUIVertexCuboid(JsonObject vertexObj, LXVector vertex, List<LXVector> vertices) {
+  private void loadUIVertexCuboid(JsonObject vertexObj, LXVector vertex, LXModel.Mesh.VertexList vertices) {
     final float width = loadFloat(vertexObj, KEY_MESH_RECT_WIDTH, true);
     final float height = loadFloat(vertexObj, KEY_MESH_RECT_HEIGHT, true);
     final float depth = loadFloat(vertexObj, KEY_MESH_RECT_DEPTH, true);

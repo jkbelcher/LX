@@ -29,6 +29,7 @@ import heronarts.lx.mixer.LXChannel;
 import heronarts.lx.mixer.LXAbstractChannel;
 import heronarts.lx.mixer.LXMixerEngine;
 import heronarts.lx.model.LXModel;
+import heronarts.lx.model.LXPoint;
 import heronarts.lx.modulation.LXModulationContainer;
 import heronarts.lx.modulation.LXModulationEngine;
 import heronarts.lx.osc.LXOscComponent;
@@ -42,6 +43,7 @@ import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.snapshot.LXSnapshotEngine;
 import heronarts.lx.structure.LXFixture;
+import heronarts.lx.structure.view.LXViewDefinition;
 
 import java.io.File;
 import java.net.SocketException;
@@ -210,6 +212,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
   public class Profiler {
     public long runNanos = 0;
     public long channelNanos = 0;
+    public long channelCompositeNanos = 0;
     public long inputNanos = 0;
     public long midiNanos = 0;
     public long oscNanos = 0;
@@ -333,10 +336,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     .setMappable(false)
     .setDescription("Whether the engine and UI are on separate threads");
 
-  public final BooleanParameter isChannelMultithreaded =
-    new BooleanParameter("Channel Threaded", false)
+  public final BooleanParameter isCompositorMultithreaded =
+    new BooleanParameter("Compositor Threaded", false)
     .setMappable(false)
-    .setDescription("Whether the engine is multi-threaded per channel");
+    .setDescription("Whether the compositing engine is multi-threaded");
 
   public final BooleanParameter isNetworkMultithreaded =
     new BooleanParameter("Network Threaded", false)
@@ -432,7 +435,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
     // Register parameters
     addParameter("multithreaded", this.isMultithreaded);
-    addParameter("channelMultithreaded", this.isChannelMultithreaded);
+    addParameter("compositorMultithreaded", this.isCompositorMultithreaded);
     addParameter("networkMultithreaded", this.isNetworkMultithreaded);
     addParameter("framesPerSecond", this.framesPerSecond);
     addParameter("speed", this.speed);
@@ -1215,6 +1218,18 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       Arrays.fill(buffer.render.aux, LXColor.BLACK);
     }
 
+    // Post-pass for any views with cue enabled
+    for (LXViewDefinition view : this.lx.structure.views.views) {
+      if (view.cueActive.isOn() && (view.getView() != null)) {
+        Arrays.fill(buffer.render.cue, LXColor.BLACK);
+        for (LXPoint p : view.getView().points) {
+          buffer.render.cue[p.index] = LXColor.WHITE;
+        }
+        buffer.render.setCueOn(true);
+        break;
+      }
+    }
+
     // Add fixture identification very last
     int identifyColor = LXColor.hsb(0, 100, Math.abs(-100 + (runStart / 8000000) % 200));
     for (LXFixture fixture : this.lx.structure.fixtures) {
@@ -1454,6 +1469,10 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
   public void load(LX lx, JsonObject obj) {
     // TODO(mcslee): remove loop tasks that other things might have added? maybe
     // need to separate application-owned loop tasks from project-specific ones...
+
+    // These need to be explicitly enabled per-project
+    this.isCompositorMultithreaded.setValue(false);
+    this.isNetworkMultithreaded.setValue(false);
 
     // Disable output by default, project must explicitly re-open
     this.output.enabled.setValue(false);
