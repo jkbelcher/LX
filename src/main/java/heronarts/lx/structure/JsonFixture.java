@@ -918,36 +918,38 @@ public class JsonFixture extends LXFixture {
         parameter.isReferenced = true;
 
         switch (returnType) {
-        case FLOAT:
-          if (parameter.type == ParameterType.FLOAT || parameter.type == ParameterType.INT) {
-            parameterValue = String.valueOf(parameter.parameter.getValue());
-          } else {
+        case FLOAT -> {
+          switch (parameter.type) {
+          case FLOAT, INT -> parameterValue = String.valueOf(parameter.parameter.getValue());
+          case BOOLEAN -> parameterValue = String.valueOf(parameter.booleanParameter.isOn());
+          default -> {
             addWarning("Cannot load non-numeric parameter $" + parameterName + " into a float type: " + key);
             return null;
           }
-          break;
-        case INT:
-          if (parameter.type == ParameterType.INT) {
-            parameterValue = String.valueOf(parameter.intParameter.getValuei());
-          } else if (parameter.type == ParameterType.FLOAT) {
-            parameterValue = String.valueOf(parameter.floatParameter.getValue());
-          } else {
+          }
+        }
+        case INT -> {
+          switch (parameter.type) {
+          case INT -> parameterValue = String.valueOf(parameter.intParameter.getValuei());
+          case FLOAT -> parameterValue = String.valueOf(parameter.floatParameter.getValue());
+          case BOOLEAN -> parameterValue = String.valueOf(parameter.booleanParameter.isOn());
+          default -> {
             addWarning("Cannot load non-numeric parameter $" + parameterName + " into an integer type: " + key);
             return null;
           }
-          break;
-        case STRING:
-        case STRING_SELECT:
+          }
+        }
+        case STRING, STRING_SELECT -> {
           parameterValue = parameter.getValueAsString();
-          break;
-        case BOOLEAN:
+        }
+        case BOOLEAN -> {
           if (parameter.type == ParameterType.BOOLEAN) {
             parameterValue = String.valueOf(parameter.booleanParameter.isOn());
           } else {
             addWarning("Cannot load non-boolean parameter $" + parameterName + " into a boolean type: " + key);
             return null;
           }
-          break;
+        }
         }
       }
       result.append(expression, index, matcher.start());
@@ -966,7 +968,7 @@ public class JsonFixture extends LXFixture {
       return 0;
     }
     try {
-      float value = _evaluateSimpleExpression(obj, key, substitutedExpression.replaceAll("\\s", ""));
+      float value = _evaluateNumericExpression(substitutedExpression.replaceAll("\\s", ""));
       if (Float.isNaN(value)) {
         addWarning("Variable expression produces NaN: " + expression);
         return 0;
@@ -982,14 +984,6 @@ public class JsonFixture extends LXFixture {
       return 0;
     }
   }
-
-  // 2D array of operators by precedence (low to high)
-  private final static char[][] SIMPLE_EXPRESSION_OPERATORS = {
-    { '+', '-' },
-    { '*', '/', '%' },
-    { '^' }
-  };
-
 
   private enum SimpleFunction {
     sin(f -> { return (float) Math.sin(Math.toRadians(f)); }),
@@ -1018,23 +1012,7 @@ public class JsonFixture extends LXFixture {
 
   }
 
-  private static boolean isOperator(char ch, char[] operators) {
-    for (char operator : operators) {
-      if (ch == operator) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static boolean isSimpleOperator(char ch) {
-    for (char[] operators : SIMPLE_EXPRESSION_OPERATORS) {
-      if (isOperator(ch, operators)) {
-        return true;
-      }
-    }
-    return false;
-  }
+  private static final String OPERATOR_CHARS = "^*/+-%<>=!&|";
 
   private static boolean isUnaryMinus(char[] chars, int index) {
     // Check it's actually a minus
@@ -1042,8 +1020,13 @@ public class JsonFixture extends LXFixture {
       return false;
     }
 
+    // If at the very front of the thing, it's unary!
+    if (index == 0) {
+      return true;
+    }
+
     // Check if preceded by another simple operator, e.g. 4+-4
-    if (isSimpleOperator(chars[index-1])) {
+    if (OPERATOR_CHARS.indexOf(chars[index-1]) >= 0) {
       return true;
     }
     // Check if preceded by a simple function token, which will no longer have
@@ -1061,85 +1044,12 @@ public class JsonFixture extends LXFixture {
   // Super-trivial hacked up implementation of *very* basic math expressions, which has now
   // got some functions tacked on. If this slippery slope keeps sliding will need to get a
   // real expression parsing + evaluation library involved at some point...
-  private float _evaluateSimpleExpression(JsonObject obj, String key, String expression) {
-    char[] chars = expression.toCharArray();
-
-    // Parentheses pass
-    int openParen = -1;
-    for (int i = 0; i < chars.length; ++i) {
-      if (chars[i] == '(') {
-        openParen = i;
-      } else if (chars[i] == ')') {
-        if (openParen < 0) {
-          throw new IllegalArgumentException("Mismatched parentheses in expression: " + expression);
-        }
-
-        // Whenever we find a closed paren, evaluate just this one parenthetical.
-        // This will naturally work from in->out on nesting, since every closed-paren
-        // catches the open-paren that was closest to it.
-        String substitutedExpression =
-          // Expression to the left of parens (maybe empty)
-          expression.substring(0, openParen) +
-          // Evaluation of what's inside the parens
-          _evaluateSimpleExpression(obj, key, expression.substring(openParen+1, i)) +
-          // Expression to right of parens (maybe empty)
-          expression.substring(i + 1);
-
-        return _evaluateSimpleExpression(obj, key, substitutedExpression);
-      }
+  private float _evaluateNumericExpression(String expression) {
+    if (_evaluateExpression(expression) instanceof ExpressionResult.Numeric numeric) {
+      return numeric.number;
     }
-
-    // All parentheses have now been cleared!
-
-    // Operator pass - these are prioritized by precedence and are left-to-right associative
-    for (char[] operators : SIMPLE_EXPRESSION_OPERATORS) {
-      for (int index = chars.length - 2; index > 0; --index) {
-        if (isOperator(chars[index], operators)) {
-
-          // Skip over the tricky unary minus operator! If preceded by another operator,
-          // then it's actually just a negative sign which will be handled below. Do not
-          // process it now as subtraction.
-          if (isUnaryMinus(chars, index)) {
-            continue;
-          }
-
-          final float left = _evaluateSimpleExpression(obj, key, expression.substring(0, index));
-          final float right = _evaluateSimpleExpression(obj, key, expression.substring(index + 1));
-
-          switch (chars[index]) {
-          case '+': return left + right;
-          case '-': return left - right;
-          case '*': return left * right;
-          case '/': return left / right;
-          case '%': return left % right;
-          case '^': return (float) Math.pow(left, right);
-          }
-        }
-      }
-    }
-
-    // The dreaded nasty unary minus operator!
-    if (chars[0] == '-') {
-      // Float.parseFloat() would handle one of these fine, but it won't handle
-      // them potentially stacking up at the front, e.g. if multiple expression
-      // resolutions have resulted in something like ---4, so do the negations
-      // manually one by one
-      return -_evaluateSimpleExpression(obj, key, expression.substring(1));
-    }
-
-    // Check for simple function operators
-    for (SimpleFunction function : SimpleFunction.values()) {
-      final String name = function.name();
-      if (expression.startsWith(name)) {
-        return function.compute.compute(_evaluateSimpleExpression(obj, key, expression.substring(name.length())));
-      }
-    }
-
-    // All clear, this *should* just be a number now (if not, syntax was bad)
-    return Float.parseFloat(expression);
+    throw new IllegalArgumentException("Expected expression to be numeric: " + expression);
   }
-
-  private final static char[] SIMPLE_BOOLEAN_OPERATORS = { '|', '&' };
 
   private boolean evaluateBooleanExpression(JsonObject obj, String key, String expression) {
     String substitutedExpression = replaceVariables(key, expression, ParameterType.BOOLEAN);
@@ -1147,7 +1057,7 @@ public class JsonFixture extends LXFixture {
       return false;
     }
     try {
-      return _evaluateBooleanExpression(obj, key, substitutedExpression);
+      return _evaluateBooleanExpression(substitutedExpression.replaceAll("\\s", ""));
     } catch (Exception x) {
       addWarning("Bad formatting in boolean expression: " + expression);
       x.printStackTrace();
@@ -1155,10 +1065,81 @@ public class JsonFixture extends LXFixture {
     }
   }
 
-  // Super-trivial implementation of *very* basic boolean expressions
-  private boolean _evaluateBooleanExpression(JsonObject obj, String key, String expression) {
-    // Parentheses pass
+  private boolean _evaluateBooleanExpression(String expression) {
+    if (_evaluateExpression(expression) instanceof ExpressionResult.Boolean bool) {
+      return bool.bool;
+    }
+    throw new IllegalArgumentException("Expected expression to be boolean: " + expression);
+  }
+
+  private static abstract class ExpressionResult {
+
+    private static class Numeric extends ExpressionResult {
+      private final float number;
+      private Numeric(float number) {
+        this.number = number;
+      }
+
+      @Override
+      public String toString() {
+        return String.valueOf(this.number);
+      }
+    }
+
+    private static class Boolean extends ExpressionResult {
+
+      private static final Boolean TRUE = new Boolean(true);
+      private static final Boolean FALSE = new Boolean(false);
+
+      private final boolean bool;
+      private Boolean(boolean bool) {
+        this.bool = bool;
+      }
+
+      @Override
+      public String toString() {
+        return String.valueOf(this.bool);
+      }
+    }
+  }
+
+  private static final String[][] EXPRESSION_OPERATORS = {
+    { "||", "|" }, // Both forms are logical, not bitwise
+    { "&&", "&" }, // Both forms are logical, not bitwise
+    { "<=", ">=", "<", ">" },
+    { "==", "!=" },
+    { "+", "-" },
+    { "*", "/", "%" },
+    { "^" }
+  };
+
+  private int _getOperatorIndex(String expression, char[] chars, String operator) {
+    if ("-".equals(operator)) {
+      for (int index = chars.length - 1; index > 0; --index) {
+        // Skip over the tricky unary minus operator! If preceded by another operator,
+        // then it's actually just a negative sign which will be handled later. Do not
+        // process it as a subtraction.
+        if ((chars[index] == '-') && !isUnaryMinus(chars, index)) {
+          return index;
+        }
+      }
+      return -1;
+    }
+    return expression.lastIndexOf(operator);
+  }
+
+  /**
+   * Expressions can have ambiguous types when nested with parentheses! This is getting
+   * out of control and I really should have just used a proper expression parsing library
+   * of some sort (-mcslee, June 2025, and yet bound to continue bolting onto this...)
+   *
+   * @param expression Portion of expression to evaluate
+   * @return ExpressionResult, which may be boolean or numeric
+   */
+  private ExpressionResult _evaluateExpression(String expression) {
     char[] chars = expression.toCharArray();
+
+    // Parentheses pass
     int openParen = -1;
     for (int i = 0; i < chars.length; ++i) {
       if (chars[i] == '(') {
@@ -1171,40 +1152,143 @@ public class JsonFixture extends LXFixture {
         // Whenever we find a closed paren, evaluate just this one parenthetical.
         // This will naturally work from in->out on nesting, since every closed-paren
         // catches the open-paren that was closest to it.
-        String substitutedExpression =
-          // Expression to the left of parens (maybe empty)
-          expression.substring(0, openParen) +
-          // Evaluation of what's inside the parens
-          _evaluateBooleanExpression(obj, key, expression.substring(openParen+1, i)) +
-          // Expression to right of parens (maybe empty)
-          expression.substring(i + 1);
+        ExpressionResult result = _evaluateExpression(expression.substring(openParen+1, i));
+        if ((openParen == 0) && (i == chars.length-1)) {
+          // Whole thing in parentheses? Just return!
+          return result;
+        }
 
-        return _evaluateBooleanExpression(obj, key, substitutedExpression);
+        // Evaluate expression recursively with this parenthetical removed
+        return _evaluateExpression(
+          expression.substring(0, openParen) +
+          result.toString() +
+          expression.substring(i + 1)
+        );
       }
     }
 
-    // Operator pass - these are prioritized so that & takes precedence over |
-    for (char operator : SIMPLE_BOOLEAN_OPERATORS) {
-      int index = expression.indexOf(operator);
-      if ((index > 0) && (index < expression.length() - 1)) {
-        boolean left = _evaluateBooleanExpression(obj, key, expression.substring(0, index));
-        boolean right = _evaluateBooleanExpression(obj, key, expression.substring(index + 1));
-        switch (operator) {
-        case '&': return left && right;
-        case '|': return left || right;
+    // Ternary conditional, lowest precedence, right->left associative
+    final int condition = expression.indexOf('?');
+    if (condition > 0) {
+      final int end = expression.lastIndexOf(':');
+      if (end <= condition) {
+        throw new IllegalArgumentException("Mismatched ternary conditional ?: in expression: " + expression);
+      }
+      return _evaluateBooleanExpression(expression.substring(0, condition)) ?
+        _evaluateExpression(expression.substring(condition+1, end)) :
+        _evaluateExpression(expression.substring(end+1));
+    }
+
+    // Left->right associative operators, working up the precedence ladder
+    for (String[] operators : EXPRESSION_OPERATORS) {
+      int lastIndex = -1;
+      String operator = null;
+      for (String candidate : operators) {
+        int candidateIndex = _getOperatorIndex(expression, chars, candidate);
+        if (candidateIndex > lastIndex) {
+          operator = candidate;
+          lastIndex = candidateIndex;
+        }
+      }
+      if (operator != null) {
+        String left = expression.substring(0, lastIndex);
+        String right = expression.substring(lastIndex + operator.length());
+        return switch (operator) {
+          case "&&", "&" -> new ExpressionResult.Boolean(
+            _evaluateBooleanExpression(left) &&
+            _evaluateBooleanExpression(right)
+          );
+          case "||", "|" -> new ExpressionResult.Boolean(
+            _evaluateBooleanExpression(left) ||
+            _evaluateBooleanExpression(right)
+          );
+          case "<=" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) <=
+            _evaluateNumericExpression(right)
+          );
+          case "<" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) <
+            _evaluateNumericExpression(right)
+          );
+          case ">=" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) >=
+            _evaluateNumericExpression(right)
+          );
+          case ">" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) >
+            _evaluateNumericExpression(right)
+          );
+          case "==" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) ==
+            _evaluateNumericExpression(right)
+          );
+          case "!=" -> new ExpressionResult.Boolean(
+            _evaluateNumericExpression(left) !=
+            _evaluateNumericExpression(right)
+          );
+          case "+" -> new ExpressionResult.Numeric(
+            _evaluateNumericExpression(left) +
+            _evaluateNumericExpression(right)
+          );
+          case "-" -> new ExpressionResult.Numeric(
+            _evaluateNumericExpression(left) -
+            _evaluateNumericExpression(right)
+          );
+          case "*" -> new ExpressionResult.Numeric(
+            _evaluateNumericExpression(left) *
+            _evaluateNumericExpression(right)
+          );
+          case "/" -> new ExpressionResult.Numeric(
+            _evaluateNumericExpression(left) /
+            _evaluateNumericExpression(right)
+          );
+          case "%" -> new ExpressionResult.Numeric(
+            _evaluateNumericExpression(left) %
+            _evaluateNumericExpression(right)
+          );
+          case "^" -> new ExpressionResult.Numeric((float) Math.pow(
+            _evaluateNumericExpression(left),
+            _evaluateNumericExpression(right)
+          ));
+
+          default -> throw new IllegalStateException("Unrecognized operator: " + operator);
+        };
+      }
+    }
+
+    // Dreaded nasty unary operators!
+    String trimmed = expression.trim();
+    if (!trimmed.isEmpty()) {
+      final char unary = trimmed.charAt(0);
+      if (unary == '-') {
+        // Float.parseFloat() would handle one of these fine, but it won't handle
+        // them potentially stacking up at the front, e.g. if multiple expression
+        // resolutions have resulted in something like ---4, so do the negations
+        // manually one by one
+        return new ExpressionResult.Numeric(-_evaluateNumericExpression(expression.substring(1)));
+      } else if (unary == '!') {
+        return new ExpressionResult.Boolean(!_evaluateBooleanExpression(expression.substring(1)));
+      }
+
+      // Check for simple function operators
+      for (SimpleFunction function : SimpleFunction.values()) {
+        final String name = function.name();
+        if (trimmed.startsWith(name)) {
+          float argument = _evaluateNumericExpression(expression.substring(name.length()));
+          return new ExpressionResult.Numeric(function.compute.compute(argument));
         }
       }
     }
 
-    // Check for any '!' operators!
-    String trimmed = expression.trim();
-    if (!trimmed.isEmpty() && (trimmed.charAt(0) == '!')) {
-      return !_evaluateBooleanExpression(obj, key, trimmed.substring(1));
-    }
-
-    // Okay just parse it!
-    return Boolean.parseBoolean(trimmed);
+    // Sort out what we got here
+    return switch (trimmed.toLowerCase()) {
+      case "" -> throw new IllegalArgumentException("Cannot evaluate empty expression: " + expression);
+      case "true" -> ExpressionResult.Boolean.TRUE;
+      case "false" -> ExpressionResult.Boolean.FALSE;
+      default -> new ExpressionResult.Numeric(Float.parseFloat(trimmed));
+    };
   }
+
 
   private float loadFloat(JsonObject obj, String key, boolean variablesAllowed) {
     return loadFloat(obj, key, variablesAllowed, key + " should be primitive float value");
