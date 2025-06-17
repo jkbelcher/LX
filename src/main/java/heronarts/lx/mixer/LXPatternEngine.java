@@ -956,7 +956,9 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
     // what the mixing mode is, because sub-patterns/effects may render
     // to views that only touch a subset of the channel's view. We don't
     // want to leave old frame cruft in the channel buffer in that case
-    blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    if (this.lx.engine.renderMode.cpu) {
+      blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    }
 
     if (this.compositeMode.getEnum() == CompositeMode.BLEND) {
 
@@ -987,7 +989,7 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
           pattern.setModel(patternView);
           pattern.loop(deltaMs);
 
-          if (patternRender) {
+          if (patternRender && this.lx.engine.renderMode.cpu) {
             pattern.compositeBlend.getObject().blend(
               colors,
               pattern.getColors(),
@@ -1051,7 +1053,9 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
         activePattern.loop(deltaMs);
       } else {
         // No active pattern, black it out!
-        blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
+        if (this.lx.engine.renderMode.cpu) {
+          blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
+        }
       }
 
       // Run transition!
@@ -1062,14 +1066,16 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
         nextPattern.setBuffer(this.renderBuffer);
         nextPattern.setModel(nextPattern.getModelView());
         nextPattern.loop(deltaMs);
-        this.transition.loop(deltaMs);
-        this.transition.lerp(
-          colors,
-          this.renderBuffer.getArray(),
-          this.transitionProgress,
-          colors,
-          modelView
-        );
+        if (this.lx.engine.renderMode.cpu) {
+          this.transition.loop(deltaMs);
+          this.transition.lerp(
+            colors,
+            this.renderBuffer.getArray(),
+            this.transitionProgress,
+            colors,
+            modelView
+          );
+        }
       } else {
         this.transitionProgress = 0;
       }

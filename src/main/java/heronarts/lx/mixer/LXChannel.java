@@ -464,11 +464,14 @@ public class LXChannel extends LXAbstractChannel implements LXPatternEngine.Cont
 
     // Apply effects
     long effectStart = System.nanoTime();
-    if (!this.mutableEffects.isEmpty()) {
-      for (LXEffect effect : this.mutableEffects) {
-        effect.setBuffer(this.blendBuffer);
-        effect.setModel(effect.getModelView());
-        effect.loop(deltaMs);
+    // Effects are disabled here for GPU mixer mode. They will need an input texture before looping.
+    if (this.lx.engine.renderMode.cpu) {
+      if (!this.mutableEffects.isEmpty()) {
+        for (LXEffect effect : this.mutableEffects) {
+          effect.setBuffer(this.blendBuffer);
+          effect.setModel(effect.getModelView());
+          effect.loop(deltaMs);
+        }
       }
     }
     ((LXBus.Profiler) this.profiler).effectNanos = System.nanoTime() - effectStart;

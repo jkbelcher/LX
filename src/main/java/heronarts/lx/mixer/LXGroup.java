@@ -115,9 +115,12 @@ public class LXGroup extends LXAbstractChannel {
 
     // Because of channel views, channel blends may not touch all pixels, so start
     // by splatting transparency onto the group buffer
-    this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    if (this.lx.engine.renderMode.cpu) {
+      this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    }
     this.colors = this.blendBuffer.getArray();
 
+    if (this.lx.engine.renderMode.cpu) {
     // Blend all channels that are enabled.
     for (LXChannel channel : this.channels) {
       final long blendStart = System.nanoTime();
@@ -131,6 +134,7 @@ public class LXGroup extends LXAbstractChannel {
         );
       }
       ((LXAbstractChannel.Profiler) channel.profiler).blendNanos = System.nanoTime() - blendStart;
+    }
     }
     ((LXGroup.Profiler) this.profiler).compositeNanos = System.nanoTime() - compositeStart;
 

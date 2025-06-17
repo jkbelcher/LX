@@ -954,7 +954,9 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         // We need to splat the output array right away. Channels may have views applied
         // which mean blend calls might not touch all the pixels. So we've got to get them
         // all re-initted upfront.
-        System.arraycopy(this.destination, 0, this.output, 0, this.destination.length);
+        if (lx.engine.renderMode.cpu) {
+          System.arraycopy(this.destination, 0, this.output, 0, this.destination.length);
+        }
         this.destination = this.output;
       }
     }
@@ -1063,6 +1065,9 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
       channel.performanceWarning.setValue(channel.performanceWarningFrameCount >= 5);
     }
 
+    // Suppress CPU blending in experimental GPU mode
+    if (this.lx.engine.renderMode.cpu) {
+
     // Step 3: blend the channel buffers down
     final boolean blendLeft = leftBusActive || this.cueA.isOn() || (isPerformanceMode && this.auxA.isOn());
     final boolean blendRight = rightBusActive || this.cueB.isOn() || (isPerformanceMode && this.auxB.isOn());
@@ -1091,7 +1096,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         if (!useMultithreadedCompositor) {
           if ((blendStack != null) && channel.enabled.isOn()) {
             final double alpha = channel.fader.getValue();
-            if (alpha > 0) {
+            if (alpha > 0 && this.lx.engine.renderMode.cpu) {
               blendStack.blend(channel.blendMode.getObject(), channel.getColors(), alpha, channel.getModelView());
             }
           }
@@ -1159,13 +1164,13 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Individual CUE/AUX channels
     for (LXAbstractChannel channel : this.channels) {
       // Blend into the cue buffer, always a direct add blend for any type of channel
-      if (channel.cueActive.isOn()) {
+      if (channel.cueActive.isOn() && this.lx.engine.renderMode.cpu) {
         cueBusActive = true;
         this.blendStackCue.blend(this.addBlend, channel.getColors(), 1, channel.getModelView());
       }
 
       // Blend into the aux buffer when in performance mode
-      if (isPerformanceMode && channel.auxActive.isOn()) {
+      if (isPerformanceMode && channel.auxActive.isOn() && this.lx.engine.renderMode.cpu) {
         auxBusActive = true;
         this.blendStackAux.blend(this.addBlend, channel.getColors(), 1, channel.getModelView());
       }
@@ -1206,7 +1211,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
       this.blendStackMain.blend(this.addBlend, this.blendStackLeft, 1., model);
     } else if (leftContent) {
       // Add the left group to the main buffer
-      this.blendStackMain.blend(this.addBlend, this.blendStackLeft, Math.min(1, 2. * (1-crossfadeValue)), model);
+      this.blendStackMain.blend(this.addBlend, this.blendStackLeft, Math.min(1, 2. * (1 - crossfadeValue)), model);
     } else if (rightContent) {
       // Add the right group to the main buffer
       this.blendStackMain.blend(this.addBlend, this.blendStackRight, Math.min(1, 2. * crossfadeValue), model);
@@ -1240,6 +1245,29 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Mark the cue active state of the buffer
     render.setCueOn(cueBusActive);
     render.setAuxOn(auxBusActive);
+
+    } // End suppression of CPU blending
+
+    // Experimental GPU mixing mode
+    if (this.lx.engine.renderMode.gpu) {
+      for (PostMixer postMixer : this.postMixers) {
+        postMixer.postMix(render.getMain(), render.getCue(), render.getAux());
+      }
+    }
+  }
+
+  public interface PostMixer {
+    public void postMix(int[] main, int[] cue, int[] aux);
+  }
+
+  private final List<PostMixer> postMixers = new ArrayList<>();
+
+  public void addPostMixer(PostMixer postMixer) {
+    this.postMixers.add(Objects.requireNonNull(postMixer));
+  }
+
+  public void removePostMixer(PostMixer postMixer) {
+    this.postMixers.remove(postMixer);
   }
 
   public void removeRemoteControls(LXComponent component) {
