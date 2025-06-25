@@ -104,9 +104,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new DiscreteParameter("Aux", 1)
     .setDescription("Which channel is currently focused in the auxiliary UI");
 
-  public final CompoundParameter crossfader = new CompoundParameter("Crossfader", 0.5)
-  .setDescription("Applies blending between output groups A and B")
-  .setPolarity(LXParameter.Polarity.BIPOLAR);
+  public final CompoundParameter crossfader =
+    new CompoundParameter("Crossfader", 0.5)
+    .setUnits(CompoundParameter.Units.PERCENT_NORMALIZED)
+    .setDescription("Applies blending between output groups A and B")
+    .setPolarity(LXParameter.Polarity.BIPOLAR);
 
   public final ObjectParameter<LXBlend> crossfaderBlendMode;
   private LXBlend activeCrossfaderBlend;
@@ -1282,7 +1284,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
   @Override
   public void load(LX lx, JsonObject obj) {
     if (obj.has(KEY_RESET)) {
-      this.parameters.reset();
+      for (LXParameter p : this.parameters.values()) {
+        if (p != this.label) {
+          p.reset();
+        }
+      }
     }
 
     // Add the new channels

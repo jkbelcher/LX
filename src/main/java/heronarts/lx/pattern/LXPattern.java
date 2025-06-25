@@ -133,7 +133,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   public final void removeListener(Listener listener) {
     if (!this.listeners.contains(listener)) {
-      throw new IllegalStateException("May not remove non-registered Bus.Listener: " + listener);
+      throw new IllegalStateException("May not remove non-registered LXPattern.Listener: " + listener);
     }
     this.listeners.remove(listener);
   }
@@ -167,6 +167,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   public final CompoundParameter compositeLevel =
     new CompoundParameter("Composite Level", 1)
+    .setUnits(CompoundParameter.Units.PERCENT_NORMALIZED)
     .setDescription("Alpha level to composite pattern at when in channel blend mode");
 
   public final BooleanParameter hasCustomCycleTime =
