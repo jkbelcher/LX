@@ -19,15 +19,22 @@
 package heronarts.lx;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Modifier;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.JarEntry;
@@ -53,6 +60,14 @@ public class LXClassLoader extends URLClassLoader {
 
   public static class Package {
 
+    private static final List<String> TRUSTED_PACKAGES = Arrays.asList(new String[] {
+      // https://github.com/EnvelopSound/EnvelopForChromatik/releases/tag/0.0.1-SNAPSHOT-2025-06-12
+      "8ae6ccb33f5431e6f446ede59273e4ab2767e3da37ea8ef40680d4ba48bfdb6a",
+
+      // https://github.com/jkbelcher/AudioStemsPlugin/releases/tag/v0.1.2
+      "b501cfccf9a2d6822b941ca920df80620ec16aef2dec3e001c20867d562946af"
+    });
+
     final File jarFile;
 
     private String name;
@@ -61,6 +76,8 @@ public class LXClassLoader extends URLClassLoader {
     private String version = null;
     private int versionCompare = 0;
     private String lxVersion = null;
+
+    final boolean trusted;
 
     private Throwable error = null;
     private int numPatterns = 0;
@@ -71,12 +88,32 @@ public class LXClassLoader extends URLClassLoader {
     private int numClasses = 0;
     private int numFailedClasses = 0;
 
+    private final List<Class<?>> classes = new ArrayList<Class<?>>();
+
     private Package(File jarFile) {
       this.jarFile = jarFile;
       this.name = jarFile.getName();
       if (name.endsWith(".jar")) {
         this.name = name.substring(0, name.length() - ".jar".length());
       }
+      this.trusted = TRUSTED_PACKAGES.contains(createDigest(jarFile));
+    }
+
+    private String createDigest(File jarFile) {
+      try (InputStream fis = new FileInputStream(jarFile)) {
+        final MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        final byte[] byteArray = new byte[4096];
+        int nBytes;
+        while ((nBytes = fis.read(byteArray)) != -1) {
+          digest.update(byteArray, 0, nBytes);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+      } catch (IOException iox) {
+        LX.error(iox, "Could not construct SHA-256 digest for " + jarFile.getName());
+      } catch (NoSuchAlgorithmException nsax) {
+        LX.error(nsax, "Could not get SHA-256 digest algorithm: " + nsax.getMessage());
+      }
+      return null;
     }
 
     public String getFileName() {
@@ -146,6 +183,10 @@ public class LXClassLoader extends URLClassLoader {
       return this.versionCompare < 0;
     }
 
+    boolean hasClass(Class<?> clz) {
+      return this.classes.contains(clz);
+    }
+
     public boolean hasError() {
       return this.error != null;
     }
@@ -199,7 +240,7 @@ public class LXClassLoader extends URLClassLoader {
     return urls.toArray(new URL[0]);
   }
 
-  private final List<File> jarFiles;
+  final List<File> jarFiles;
 
   protected LXClassLoader(LX lx) {
     this(lx, defaultJarFiles(lx));
@@ -208,7 +249,7 @@ public class LXClassLoader extends URLClassLoader {
   protected LXClassLoader(LX lx, List<File> jarFiles) {
     super(fileListToURLArray(jarFiles), lx.getClass().getClassLoader());
     this.lx = lx;
-    this.jarFiles = jarFiles;
+    this.jarFiles = Collections.unmodifiableList(jarFiles);
   }
 
   protected void load() {
@@ -378,6 +419,7 @@ public class LXClassLoader extends URLClassLoader {
     ++pack.numClasses;
     this.duplicates.put(className, pack);
     this.classes.add(clz);
+    pack.classes.add(clz);
     this.lx.registry.addClass(clz, pack);
   }
 

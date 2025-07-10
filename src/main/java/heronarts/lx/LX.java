@@ -70,7 +70,7 @@ import com.google.gson.stream.JsonWriter;
  */
 public class LX {
 
-  public static final String VERSION = "1.1.1-TE.1-SNAPSHOT";
+  public static final String VERSION = "1.1.1-TE.2-SNAPSHOT";
 
   public static class InstantiationException extends Exception {
 
@@ -487,6 +487,11 @@ public class LX {
       this.preferences.loadEULA();
     }
 
+    // Glue registry watch service to package preference
+    this.preferences.autoReloadPackages.addListener(p -> {
+      this.registry.enableWatchService(this.preferences.autoReloadPackages.isOn());
+    }, true);
+
     // Scheduler
     this.scheduler = new LXScheduler(this);
 
@@ -727,6 +732,7 @@ public class LX {
    */
   public void dispose() {
     LX.dispose(this.engine);
+    this.registry.closeWatchService();
   }
 
   /**

@@ -21,7 +21,9 @@ package heronarts.lx.snapshot;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import com.google.gson.JsonArray;
@@ -38,6 +40,8 @@ import heronarts.lx.LXPath;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.command.LXCommand;
 import heronarts.lx.effect.LXEffect;
+import heronarts.lx.midi.MidiFilterParameter;
+import heronarts.lx.midi.MidiSelector;
 import heronarts.lx.mixer.LXAbstractChannel;
 import heronarts.lx.mixer.LXBus;
 import heronarts.lx.mixer.LXChannel;
@@ -50,6 +54,7 @@ import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXNormalizedParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.StringParameter;
+import heronarts.lx.parameter.TriggerParameter;
 import heronarts.lx.pattern.LXPattern;
 import heronarts.lx.pattern.PatternRack;
 import heronarts.lx.utils.LXUtils;
@@ -62,6 +67,15 @@ import heronarts.lx.utils.LXUtils;
  */
 public abstract class LXSnapshot extends LXComponent {
 
+  public interface Listener {
+    public void snapshotDisposed(LXSnapshot snapshot);
+    public void viewAdded(LXSnapshot snapshot, View view);
+    public void viewRemoved(LXSnapshot snapshot, View view);
+    public void viewUpdated(LXSnapshot snapshot, View view);
+  }
+
+  private final Map<String, View> viewPaths = new HashMap<>();
+
   private final List<View> mutableViews = new ArrayList<View>();
 
   /**
@@ -70,13 +84,24 @@ public abstract class LXSnapshot extends LXComponent {
   public final List<View> views = Collections.unmodifiableList(this.mutableViews);
 
   public static enum ViewScope {
-    MIXER,
-    PATTERNS,
-    EFFECTS,
-    OUTPUT,
-    MODULATION,
-    GLOBAL,
-    MASTER;
+    MIXER("Mixer"),
+    PATTERNS("Pattern"),
+    EFFECTS("Effect"),
+    OUTPUT("Output"),
+    MODULATION("Modulation"),
+    GLOBAL("Global"),
+    MASTER("Master");
+
+    public final String label;
+
+    private ViewScope(String label) {
+      this.label = label;
+    }
+
+    @Override
+    public String toString() {
+      return this.label;
+    }
   }
 
   /**
@@ -101,14 +126,18 @@ public abstract class LXSnapshot extends LXComponent {
     /**
      * The pattern which is active on a rack
      */
-    RACK_PATTERN
+    RACK_PATTERN;
+
+    public static ViewType get(JsonObject obj) {
+      return valueOf(obj.get(View.KEY_TYPE).getAsString());
+    }
   };
 
   /**
    * A view is a component of a snapshot, it's a single piece of the snapshot that
    * is "looking at" one piece of state.
    */
-  public abstract class View implements LXSerializable {
+  public abstract sealed class View implements LXSerializable permits ParameterView, ChannelFaderView, ActivePatternView, RackPatternView {
 
     public final ViewScope scope;
     private final ViewType type;
@@ -119,9 +148,10 @@ public abstract class LXSnapshot extends LXComponent {
     /**
      * Whether this view is enabled for recall or not.
      */
-    public final BooleanParameter enabled = new BooleanParameter("Enabled", true)
-    .setMappable(false)
-    .setDescription("Whether this view is enabled in the snapshot");
+    public final BooleanParameter enabled =
+      new BooleanParameter("Enabled", true)
+      .setMappable(false)
+      .setDescription("Whether this view is enabled in the snapshot");
 
     private View(ViewScope scope, ViewType type) {
       this.scope = scope;
@@ -131,8 +161,36 @@ public abstract class LXSnapshot extends LXComponent {
     private View(LX lx, JsonObject obj) {
       LXSerializable.Utils.loadBoolean(this.enabled, obj, KEY_ENABLED);
       this.scope = ViewScope.valueOf(obj.get(KEY_SCOPE).getAsString());
-      this.type = ViewType.valueOf(obj.get(KEY_TYPE).getAsString());
+      this.type = ViewType.get(obj);
     }
+
+    /**
+     * Gets a descriptive label for the parameter or field represented by the view
+     *
+     * @return Descriptive label for the parameter or field represented by the view
+     */
+    public abstract String getLabel();
+
+    /**
+     * Gets a description of the behavior of the parameter or field represented by the view
+     *
+     * @return Description of the behavior of the parameter or field represented by the view
+     */
+    public abstract String getDescription();
+
+    /**
+     * Gets the component that owns the parameter/field referenced by the view
+     *
+     * @return Component that owns the parameter/field referenced by the view
+     */
+    public abstract LXComponent getViewComponent();
+
+    /**
+     * Gets a unique path identifier for this view in the context of its snapshot
+     *
+     * @return Unique path identifier for this view in the context of its snapshot
+     */
+    public abstract String getViewPath();
 
     /**
      * Returns the snapshot that this view belongs to
@@ -209,14 +267,15 @@ public abstract class LXSnapshot extends LXComponent {
   /**
    * Class for the recall of a simple parameter value
    */
-  public class ParameterView extends View {
+  public final class ParameterView extends View {
 
-    private final LXComponent component;
-    private final LXParameter parameter;
-    private final double value;
-    private final int intValue;
-    private final String stringValue;
-    private final double normalizedValue;
+    public final LXComponent component;
+    public final LXParameter parameter;
+
+    private double value;
+    private int intValue;
+    private String stringValue;
+    private double normalizedValue;
 
     private ParameterView(ViewScope scope, LXParameter parameter) {
       super(scope, ViewType.PARAMETER);
@@ -229,18 +288,18 @@ public abstract class LXSnapshot extends LXComponent {
       }
       this.parameter = parameter;
       this.value = this.parameter.getBaseValue();
-      if (parameter instanceof DiscreteParameter) {
-        this.intValue = ((DiscreteParameter) parameter).getBaseValuei();
+      if (parameter instanceof DiscreteParameter discreteParameter) {
+        this.intValue = discreteParameter.getBaseValuei();
         this.stringValue = null;
-      } else if (parameter instanceof StringParameter) {
+      } else if (parameter instanceof StringParameter stringParameter) {
         this.intValue = 0;
-        this.stringValue = ((StringParameter) parameter).getString();
+        this.stringValue = stringParameter.getString();
       } else {
         this.intValue = 0;
         this.stringValue = null;
       }
-      if (parameter instanceof LXNormalizedParameter) {
-        this.normalizedValue = ((LXNormalizedParameter) parameter).getBaseNormalized();
+      if (parameter instanceof LXNormalizedParameter normalizedParameter) {
+        this.normalizedValue = normalizedParameter.getBaseNormalized();
       } else {
         this.normalizedValue = 0;
       }
@@ -269,9 +328,9 @@ public abstract class LXSnapshot extends LXComponent {
         this.value = this.intValue = obj.get(KEY_VALUE).getAsInt();
         this.stringValue = null;
         obj.addProperty(KEY_VALUE, this.intValue);
-      } else if (parameter instanceof StringParameter) {
+      } else if (this.parameter instanceof StringParameter) {
         final JsonElement value = obj.get(KEY_VALUE);
-        this.stringValue = (value instanceof JsonNull) ? null : value.getAsString();
+        this.stringValue = ((value == null) || (value instanceof JsonNull)) ? null : value.getAsString();
         this.intValue = 0;
         this.value = 0;
       } else {
@@ -282,12 +341,81 @@ public abstract class LXSnapshot extends LXComponent {
       this.normalizedValue = obj.get(KEY_NORMALIZED_VALUE).getAsDouble();
     }
 
+    public double getParameterValue() {
+      return this.value;
+    }
+
+    public double getParameterNormalizedValue() {
+      return this.normalizedValue;
+    }
+
+    public String getParameterStringValue() {
+      return this.stringValue;
+    }
+
+    public int getParameterDiscreteValue() {
+      return this.intValue;
+    }
+
+    public void updateNormalized(double value, double normalizedValue) {
+      this.value = value;
+      this.normalizedValue = normalizedValue;
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    public void updateDiscrete(int value, double normalizedValue) {
+      this.value = this.intValue = value;
+      this.normalizedValue = normalizedValue;
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    public void updateString(String stringValue) {
+      this.stringValue = stringValue;
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    @Override
+    public String getLabel() {
+      String label = this.parameter.getLabel();
+      AggregateParameter parent = this.parameter.getParentParameter();
+      while (parent != null) {
+        label = parent.getLabel() + " | " + label;
+        parent = parent.getParentParameter();
+      }
+      return label;
+    }
+
+    @Override
+    public String getDescription() {
+      final String description = this.parameter.getDescription();
+      return LXUtils.isEmpty(description) ? "<No Description>" : description;
+    }
+
+    @Override
+    public LXComponent getViewComponent() {
+      return this.component;
+    }
+
+    @Override
+    public String getViewPath() {
+      return this.parameter.getCanonicalPath(snapshotParameterScope);
+    }
+
+    public String getValueLabel() {
+      return switch (this.parameter) {
+        case StringParameter str -> (this.stringValue != null) ? this.stringValue : "<null>";
+        case BooleanParameter bool -> this.normalizedValue > 0 ? "On": "Off";
+        case DiscreteParameter discrete -> discrete.getOption(this.intValue);
+        default -> this.parameter.getFormatter().format(this.value);
+      };
+    }
+
     @Override
     public LXCommand getCommand() {
-      if (this.parameter instanceof DiscreteParameter) {
-        return new LXCommand.Parameter.SetValue((DiscreteParameter) this.parameter, this.intValue);
-      } else if (this.parameter instanceof StringParameter) {
-        return new LXCommand.Parameter.SetString((StringParameter) this.parameter, this.stringValue);
+      if (this.parameter instanceof DiscreteParameter discreteParameter) {
+        return new LXCommand.Parameter.SetValue(discreteParameter, this.intValue);
+      } else if (this.parameter instanceof StringParameter stringParameter) {
+        return new LXCommand.Parameter.SetString(stringParameter, this.stringValue);
       } else {
         return new LXCommand.Parameter.SetValue(this.parameter, this.value);
       }
@@ -304,10 +432,10 @@ public abstract class LXSnapshot extends LXComponent {
 
     @Override
     protected void recall() {
-      if (this.parameter instanceof DiscreteParameter) {
-        ((DiscreteParameter) this.parameter).setValue(this.intValue);
-      } else if (parameter instanceof StringParameter) {
-        ((StringParameter) this.parameter).setValue(this.stringValue);
+      if (this.parameter instanceof DiscreteParameter discreteParameter) {
+        discreteParameter.setValue(this.intValue);
+      } else if (parameter instanceof StringParameter stringParameter) {
+        stringParameter.setValue(this.stringValue);
       } else {
         this.parameter.setValue(this.value);
       }
@@ -321,10 +449,10 @@ public abstract class LXSnapshot extends LXComponent {
     protected void startTransition() {
       if (this.parameter instanceof StringParameter) {
         recall();
-      } else if (this.parameter instanceof LXNormalizedParameter) {
-        this.fromNormalized = ((LXNormalizedParameter) this.parameter).getBaseNormalized();
-      } else if (this.parameter instanceof DiscreteParameter) {
-        this.fromInt = ((DiscreteParameter) this.parameter).getBaseValuei();
+      } else if (this.parameter instanceof LXNormalizedParameter normalizedParameter) {
+        this.fromNormalized = normalizedParameter.getBaseNormalized();
+      } else if (this.parameter instanceof DiscreteParameter discreteParameter) {
+        this.fromInt = discreteParameter.getBaseValuei();
       } else {
         this.fromValue = this.parameter.getValue();
       }
@@ -334,10 +462,10 @@ public abstract class LXSnapshot extends LXComponent {
     protected void interpolate(double amount) {
       if (this.parameter instanceof StringParameter) {
         // No interpolating strings
-      } else if (this.parameter instanceof LXNormalizedParameter) {
-        ((LXNormalizedParameter) this.parameter).setNormalized(LXUtils.lerp(this.fromNormalized, this.normalizedValue, amount));
-      } else if (this.parameter instanceof DiscreteParameter) {
-        ((DiscreteParameter) this.parameter).setValue(LXUtils.lerpi(this.fromInt, this.intValue, (float) amount));
+      } else if (this.parameter instanceof LXNormalizedParameter normalizedParameter) {
+        normalizedParameter.setNormalized(LXUtils.lerp(this.fromNormalized, this.normalizedValue, amount));
+      } else if (this.parameter instanceof DiscreteParameter discreteParameter) {
+        discreteParameter.setValue(LXUtils.lerpi(this.fromInt, this.intValue, (float) amount));
       } else {
         this.parameter.setValue(LXUtils.lerp(this.fromValue, this.value, amount));
       }
@@ -348,14 +476,14 @@ public abstract class LXSnapshot extends LXComponent {
       recall();
     }
 
-    private static final String KEY_PARAMETER_PATH = "parameterPath";
+    private static final String KEY_PARAMETER_PATH = LXComponent.KEY_PARAMETER_PATH;
     private static final String KEY_VALUE = "value";
     private static final String KEY_NORMALIZED_VALUE = "normalizedValue";
 
     @Override
     public void save(LX lx, JsonObject obj) {
       super.save(lx, obj);
-      obj.addProperty(KEY_PARAMETER_PATH, this.parameter.getCanonicalPath(snapshotParameterScope));
+      obj.addProperty(KEY_PARAMETER_PATH, getViewPath());
       if (this.parameter instanceof DiscreteParameter) {
         obj.addProperty(KEY_VALUE, this.intValue);
       } else if (this.parameter instanceof StringParameter) {
@@ -368,13 +496,13 @@ public abstract class LXSnapshot extends LXComponent {
 
   }
 
-  public class ChannelFaderView extends View {
+  public final class ChannelFaderView extends View {
 
-    private final LXAbstractChannel channel;
+    public final LXAbstractChannel channel;
     private final boolean enabled;
-    private final double fader;
+    private double faderValue;
 
-    private double fromFader, toFader;
+    private double fromFaderValue, toFaderValue;
     private boolean wasEnabled;
 
     private ChannelFaderView(LXAbstractChannel channel) {
@@ -385,7 +513,7 @@ public abstract class LXSnapshot extends LXComponent {
       super(ViewScope.MIXER, ViewType.CHANNEL_FADER);
       this.channel = channel;
       this.enabled = enabled;
-      this.fader = fader;
+      this.faderValue = fader;
     }
 
     private ChannelFaderView(LX lx, JsonObject obj) {
@@ -401,12 +529,41 @@ public abstract class LXSnapshot extends LXComponent {
         throw new IllegalStateException("Cannot create ChannelFaderView of non-existent channel: " + channelPath);
       }
       this.enabled = obj.get(KEY_CHANNEL_ENABLED).getAsBoolean();
-      this.fader = obj.get(KEY_CHANNEL_FADER).getAsDouble();
+      this.faderValue = obj.get(KEY_CHANNEL_FADER).getAsDouble();
+    }
+
+    public void update(double faderValue) {
+      this.faderValue = faderValue;
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    @Override
+    public String getLabel() {
+      return this.channel.fader.getLabel();
+    }
+
+    @Override
+    public String getDescription() {
+      return this.channel.fader.getDescription();
+    }
+
+    @Override
+    public LXComponent getViewComponent() {
+      return this.channel;
+    }
+
+    @Override
+    public String getViewPath() {
+      return this.channel.fader.getCanonicalPath(snapshotParameterScope);
+    }
+
+    public double getFaderValue() {
+      return this.faderValue;
     }
 
     @Override
     public LXCommand getCommand() {
-      return new LXCommand.Channel.SetFader(this.channel, this.enabled, this.fader);
+      return new LXCommand.Channel.SetFader(this.channel, this.enabled, this.faderValue);
     }
 
     @Override
@@ -417,7 +574,7 @@ public abstract class LXSnapshot extends LXComponent {
     @Override
     protected void recall() {
       this.channel.enabled.setValue(this.enabled);
-      this.channel.fader.setValue(this.fader);
+      this.channel.fader.setValue(this.faderValue);
     }
 
     @Override
@@ -425,23 +582,23 @@ public abstract class LXSnapshot extends LXComponent {
       this.wasEnabled = this.channel.enabled.isOn();
       if ((this.wasEnabled != this.enabled) && (lx.engine.snapshots.channelMode.getEnum() == LXSnapshotEngine.ChannelMode.FADE)) {
         if (this.enabled) {
-          this.channel.fader.setValue(this.fromFader = 0);
-          this.toFader = this.fader;
+          this.channel.fader.setValue(this.fromFaderValue = 0);
+          this.toFaderValue = this.faderValue;
           this.channel.enabled.setValue(true);
         } else {
-          this.fromFader = this.channel.fader.getBaseValue();
-          this.toFader = 0;
+          this.fromFaderValue = this.channel.fader.getBaseValue();
+          this.toFaderValue = 0;
         }
       } else {
         this.channel.enabled.setValue(this.enabled);
-        this.fromFader = this.channel.fader.getBaseValue();
-        this.toFader = this.fader;
+        this.fromFaderValue = this.channel.fader.getBaseValue();
+        this.toFaderValue = this.faderValue;
       }
     }
 
     @Override
     protected void interpolate(double amount) {
-      this.channel.fader.setValue(LXUtils.lerp(this.fromFader, this.toFader, amount));
+      this.channel.fader.setValue(LXUtils.lerp(this.fromFaderValue, this.toFaderValue, amount));
     }
 
     @Override
@@ -460,7 +617,7 @@ public abstract class LXSnapshot extends LXComponent {
         obj.addProperty(KEY_CHANNEL_PATH, this.channel.getCanonicalPath());
       }
       obj.addProperty(KEY_CHANNEL_ENABLED, this.enabled);
-      obj.addProperty(KEY_CHANNEL_FADER, this.fader);
+      obj.addProperty(KEY_CHANNEL_FADER, this.faderValue);
     }
 
   }
@@ -468,10 +625,10 @@ public abstract class LXSnapshot extends LXComponent {
   /**
    * View for which pattern is active on a channel
    */
-  public class ActivePatternView extends View {
+  public final class ActivePatternView extends View {
 
-    private final LXChannel channel;
-    private final LXPattern pattern;
+    public final LXChannel channel;
+    private LXPattern pattern;
 
     private ActivePatternView(LXChannel channel) {
       super(ViewScope.PATTERNS, ViewType.ACTIVE_PATTERN);
@@ -498,6 +655,37 @@ public abstract class LXSnapshot extends LXComponent {
       }
     }
 
+    public LXPattern getPattern() {
+      return this.pattern;
+    }
+
+    public void update(int patternIndex) {
+      this.pattern = this.channel.getPattern(patternIndex);
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    @Override
+    public String getLabel() {
+      return "Active Pattern";
+    }
+
+    @Override
+    public String getDescription() {
+      return "Specifies which pattern is active on the channel.";
+    }
+
+    @Override
+    public LXComponent getViewComponent() {
+      return this.channel;
+    }
+
+    @Override
+    public String getViewPath() {
+      final String prefix = (this.channel == snapshotParameterScope) ? "" :
+        this.channel.getCanonicalPath(snapshotParameterScope);
+      return prefix + "/" + LXPatternEngine.PATH_ACTIVE_PATTERN;
+    }
+
     @Override
     public LXCommand getCommand() {
       return new LXCommand.Channel.GoPattern(this.channel, this.pattern);
@@ -515,6 +703,7 @@ public abstract class LXSnapshot extends LXComponent {
 
     private static final String KEY_CHANNEL_PATH = "channelPath";
     private static final String KEY_ACTIVE_PATTERN_INDEX = "activePatternIndex";
+    private static final String KEY_PATTERN_ID = "patternId";
 
     @Override
     public void save(LX lx, JsonObject obj) {
@@ -523,6 +712,7 @@ public abstract class LXSnapshot extends LXComponent {
         obj.addProperty(KEY_CHANNEL_PATH, this.channel.getCanonicalPath(snapshotParameterScope));
       }
       obj.addProperty(KEY_ACTIVE_PATTERN_INDEX, this.pattern.getIndex());
+      obj.addProperty(KEY_PATTERN_ID, this.pattern.getId());
     }
   }
 
@@ -531,10 +721,10 @@ public abstract class LXSnapshot extends LXComponent {
    * but easier to keep stored data format clear for backwards compatibility with a dedicated
    * type here.
    */
-  public class RackPatternView extends View {
+  public final class RackPatternView extends View {
 
-    private final PatternRack rack;
-    private final LXPattern pattern;
+    public final PatternRack rack;
+    private LXPattern pattern;
 
     private RackPatternView(PatternRack rack) {
       super(ViewScope.PATTERNS, ViewType.RACK_PATTERN);
@@ -560,6 +750,35 @@ public abstract class LXSnapshot extends LXComponent {
       }
     }
 
+    public LXPattern getPattern() {
+      return this.pattern;
+    }
+
+    public void update(int patternIndex) {
+      this.pattern = this.rack.patterns.get(patternIndex);
+      listeners.forEach(listener -> listener.viewUpdated(LXSnapshot.this, this));
+    }
+
+    @Override
+    public String getLabel() {
+      return "Active Pattern";
+    }
+
+    @Override
+    public String getDescription() {
+      return "Specifies which pattern is active in the rack.";
+    }
+
+    @Override
+    public LXComponent getViewComponent() {
+      return this.rack;
+    }
+
+    @Override
+    public String getViewPath() {
+      return this.rack.getCanonicalPath(snapshotParameterScope) + "/" + LXPatternEngine.PATH_ACTIVE_PATTERN;
+    }
+
     @Override
     public LXCommand getCommand() {
       return new LXCommand.Channel.GoPattern(this.rack, this.pattern);
@@ -577,12 +796,14 @@ public abstract class LXSnapshot extends LXComponent {
 
     private static final String KEY_RACK_PATH = "rackPath";
     private static final String KEY_ACTIVE_PATTERN_INDEX = "activePatternIndex";
+    private static final String KEY_PATTERN_ID = ActivePatternView.KEY_PATTERN_ID;
 
     @Override
     public void save(LX lx, JsonObject obj) {
       super.save(lx, obj);
       obj.addProperty(KEY_RACK_PATH, this.rack.getCanonicalPath(snapshotParameterScope));
       obj.addProperty(KEY_ACTIVE_PATTERN_INDEX, this.pattern.getIndex());
+      obj.addProperty(KEY_PATTERN_ID, this.pattern.getId());
     }
   }
 
@@ -607,12 +828,37 @@ public abstract class LXSnapshot extends LXComponent {
     addParameter("transitionTimeSecs", this.transitionTimeSecs);
   }
 
+  private final List<Listener> listeners = new ArrayList<Listener>();
+
+  public final void addListener(Listener listener) {
+    Objects.requireNonNull(listener, "May not add null LXSnapshot.Listener");
+    if (this.listeners.contains(listener)) {
+      throw new IllegalStateException("May not add duplicate LXSnapshot.Listener: " + listener);
+    }
+    this.listeners.add(listener);
+  }
+
+  public final void removeListener(Listener listener) {
+    if (!this.listeners.contains(listener)) {
+      throw new IllegalStateException("May not remove non-registered LXSnapshot.Listener: " + listener);
+    }
+    if (this.inDispose) {
+      this.disposeListeners.add(listener);
+    } else {
+      this.listeners.remove(listener);
+    }
+  }
+
   public boolean isGlobalSnapshot() {
     return (this instanceof LXGlobalSnapshot);
   }
 
   public boolean isClipSnapshot() {
     return (this instanceof LXClipSnapshot);
+  }
+
+  public StringParameter getLabelParameter() {
+    return this.label;
   }
 
   public LXChannel getClipChannel() {
@@ -644,11 +890,10 @@ public abstract class LXSnapshot extends LXComponent {
       addParameterView(ViewScope.MASTER, bus.fader);
     }
 
-    if (bus instanceof LXAbstractChannel) {
+    if (bus instanceof LXAbstractChannel channel) {
       // But channel faders work in conjunction with the channel
       // enabled state, which is more complex, so we use the
       // special ChannelFaderView here
-      LXAbstractChannel channel = (LXAbstractChannel) bus;
       addView(new ChannelFaderView(channel));
       addParameterView(ViewScope.MIXER, channel.crossfadeGroup);
     }
@@ -672,8 +917,7 @@ public abstract class LXSnapshot extends LXComponent {
       } else {
         for (LXPattern pattern : channel.patterns) {
           if (pattern.enabled.isOn()) {
-            // Store all settings for any pattern that is active, explicitly including enabled state
-            addParameterView(ViewScope.PATTERNS, pattern.enabled);
+            // Store all settings for any pattern that is active
             addPatternView(pattern);
           } else {
             // Just store enabled (disabled) state for a pattern that's off
@@ -713,8 +957,7 @@ public abstract class LXSnapshot extends LXComponent {
         case BLEND ->{
           for (LXPattern rackPattern : rack.patterns) {
             if (rackPattern.enabled.isOn()) {
-              // Store all settings for any pattern that is active, explicitly including enabled state
-              addParameterView(ViewScope.PATTERNS, rackPattern.enabled);
+              // Store all settings for any pattern that is active (implicitly includes enabled state)
               addPatternView(rackPattern);
             } else {
               // Just store enabled (disabled) state for a pattern that's off
@@ -729,11 +972,14 @@ public abstract class LXSnapshot extends LXComponent {
     }
   }
 
+  protected LXParameter _checkParameter(LXParameter p) {
+    AggregateParameter ap = p.getParentParameter();
+    return (ap != null) ? ap : p;
+  }
+
   protected void addDeviceView(ViewScope scope, LXDeviceComponent device) {
     for (LXParameter p : device.getParameters()) {
-      AggregateParameter ap = p.getParentParameter();
-      LXParameter check = (ap != null) ? ap : p;
-      if (device.isSnapshotControl(check)) {
+      if (device.isSnapshotControl(_checkParameter(p))) {
         addParameterView(scope, p);
       }
     }
@@ -747,7 +993,7 @@ public abstract class LXSnapshot extends LXComponent {
 
   protected void addLayeredView(ViewScope scope, LXLayeredComponent component) {
     for (LXParameter p : component.getParameters()) {
-      if (p != component.label) {
+      if (component.isSnapshotControl(_checkParameter(p))) {
         addParameterView(scope, p);
       }
     }
@@ -758,13 +1004,22 @@ public abstract class LXSnapshot extends LXComponent {
 
   protected void addDeviceChildView(ViewScope scope, LXComponent component) {
     for (LXParameter p : component.getParameters()) {
-      if (p != component.label) {
+      if (component.isSnapshotControl(_checkParameter(p))) {
         addParameterView(scope, p);
       }
     }
   }
 
   protected void addParameterView(ViewScope scope, LXParameter p) {
+    final AggregateParameter parent = p.getParentParameter();
+    if (parent instanceof MidiSelector || parent instanceof MidiFilterParameter) {
+      // Do not store MIDI settings in snapshots
+      return;
+    }
+    if (p instanceof TriggerParameter) {
+      // Do not store Trigger parameters in snapshots
+      return;
+    }
     if (p instanceof AggregateParameter) {
       // Don't add AggregateParameters directly, let the sub-values restore
       return;
@@ -779,8 +1034,7 @@ public abstract class LXSnapshot extends LXComponent {
    * @return The new view object
    */
   public View addView(JsonObject viewObj) {
-    final ViewType type = ViewType.valueOf(viewObj.get(View.KEY_TYPE).getAsString());
-    final View view = switch (type) {
+    final View view = switch (ViewType.get(viewObj)) {
     case PARAMETER -> new ParameterView(getLX(), viewObj);
     case ACTIVE_PATTERN -> new ActivePatternView(getLX(), viewObj);
     case RACK_PATTERN -> new RackPatternView(getLX(), viewObj);
@@ -795,6 +1049,43 @@ public abstract class LXSnapshot extends LXComponent {
     return view;
   }
 
+  public View moveView(JsonObject viewObj, String fromPath, String toPath, PatternRack rack) {
+    switch (ViewType.get(viewObj)) {
+      case PARAMETER -> {
+        viewObj = _moveView(viewObj, ParameterView.KEY_PARAMETER_PATH, fromPath, toPath);
+      }
+      case RACK_PATTERN -> {
+        viewObj = _moveView(viewObj, RackPatternView.KEY_RACK_PATH, fromPath, toPath);
+        _moveViewPattern(viewObj, rack);
+      }
+      case ACTIVE_PATTERN -> {
+        _moveViewPattern(viewObj, rack);
+      }
+      case CHANNEL_FADER -> {}
+    }
+    return addView(viewObj);
+  }
+
+  private void _moveViewPattern(JsonObject viewObj, PatternRack rack) {
+    LXPattern pattern = (LXPattern) this.lx.getProjectComponent(viewObj.get(ActivePatternView.KEY_PATTERN_ID).getAsInt());
+    if (rack.patterns.contains(pattern)) {
+      // The active pattern was moved into a rack, the rack is now active
+      viewObj.addProperty(ActivePatternView.KEY_ACTIVE_PATTERN_INDEX, rack.getIndex());
+    } else {
+      // Indices may have changed in a rack group operation... update
+      viewObj.addProperty(ActivePatternView.KEY_ACTIVE_PATTERN_INDEX, pattern.getIndex());
+    }
+  }
+
+  private JsonObject _moveView(JsonObject viewObj, String key, String fromPath, String toPath) {
+    JsonObject moveObj = viewObj.deepCopy();
+    final String prefix = this.snapshotParameterScope.getCanonicalPath();
+    fromPath = LXPath.stripPrefix(fromPath, prefix);
+    toPath = LXPath.stripPrefix(toPath, prefix);
+    moveObj.addProperty(key, LXPath.replacePrefix(moveObj.get(key).getAsString(), fromPath, toPath));
+    return moveObj;
+  }
+
   /**
    * Add a view to this snapshot
    *
@@ -805,7 +1096,13 @@ public abstract class LXSnapshot extends LXComponent {
     if (this.views.contains(view)) {
       throw new IllegalStateException("May not add same view instance twice: " + this + " " + view);
     }
+    final String viewPath = view.getViewPath();
+    if (this.viewPaths.containsKey(viewPath)) {
+      LX.error("Attempting to register two Snapshot views to the same path " + viewPath + ": " + view.getClass().getName());
+    }
+    this.viewPaths.put(viewPath, view);
     this.mutableViews.add(view);
+    this.listeners.forEach(listener -> listener.viewAdded(this, view));
   }
 
   /**
@@ -817,8 +1114,20 @@ public abstract class LXSnapshot extends LXComponent {
     if (!this.views.contains(view)) {
       throw new IllegalStateException("Cannot remove View that doesn't belong to snapshot: " + view);
     }
+    this.viewPaths.remove(view.getViewPath());
     this.mutableViews.remove(view);
+    this.listeners.forEach(listener -> listener.viewRemoved(this, view));
     view.dispose();
+  }
+
+  /**
+   * Get a view by its scoped path in this snapshot
+   *
+   * @param viewPath Path to the view in this snapshot (matching view.getViewPath())
+   * @return View
+   */
+  public View getView(String viewPath) {
+    return this.viewPaths.get(viewPath);
   }
 
   private void clearViews() {
@@ -830,8 +1139,8 @@ public abstract class LXSnapshot extends LXComponent {
 
   boolean hasChannelFaderView(LXAbstractChannel channel) {
     for (View view : this.views) {
-      if (view instanceof ChannelFaderView) {
-        if (((ChannelFaderView) view).channel == channel) {
+      if (view instanceof ChannelFaderView channelFaderView) {
+        if (channelFaderView.channel == channel) {
           return true;
         }
       }
@@ -843,13 +1152,20 @@ public abstract class LXSnapshot extends LXComponent {
     return new LXGlobalSnapshot.ChannelFaderView(channel, false, 0);
   }
 
+  private boolean inDispose = false;
+  private final List<Listener> disposeListeners = new ArrayList<>();
+
   @Override
   public void dispose() {
-    for (View view : this.views) {
-      view.dispose();
-    }
-    this.mutableViews.clear();
+    clearViews();
+    this.inDispose = true;
+    this.listeners.forEach(listener -> listener.snapshotDisposed(this));
+    this.inDispose = false;
+    this.listeners.removeAll(this.disposeListeners);
+    this.disposeListeners.clear();
     super.dispose();
+    this.listeners.forEach(listener -> LX.warning("Stranded LXSnapshot.Listener: " + listener));
+    this.listeners.clear();
   }
 
   private static final String KEY_VIEWS = "views";

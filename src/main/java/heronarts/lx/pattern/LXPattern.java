@@ -33,6 +33,7 @@ import heronarts.lx.LXDeviceComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.LXTime;
 import heronarts.lx.blend.LXBlend;
+import heronarts.lx.command.LXCommand;
 import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.mixer.LXChannel;
@@ -133,7 +134,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   public final void removeListener(Listener listener) {
     if (!this.listeners.contains(listener)) {
-      throw new IllegalStateException("May not remove non-registered Bus.Listener: " + listener);
+      throw new IllegalStateException("May not remove non-registered LXPattern.Listener: " + listener);
     }
     this.listeners.remove(listener);
   }
@@ -167,6 +168,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
   public final CompoundParameter compositeLevel =
     new CompoundParameter("Composite Level", 1)
+    .setUnits(CompoundParameter.Units.PERCENT_NORMALIZED)
     .setDescription("Alpha level to composite pattern at when in channel blend mode");
 
   public final BooleanParameter hasCustomCycleTime =
@@ -255,6 +257,13 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
   };
 
+  private final LXParameterListener onRename = p -> {
+    final LXPatternEngine engine = getEngine();
+    if (engine != null) {
+      engine.patternRenamed.bang();
+    }
+  };
+
   protected double runMs = 0;
 
   private boolean isActive = false;
@@ -302,6 +311,8 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
     this.cueActive.addListener(this.onCue);
     this.auxActive.addListener(this.onAux);
+
+    this.label.addListener(this.onRename);
   }
 
   @Override
@@ -767,6 +778,11 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
   }
 
+  @Override
+  public void reload() {
+    this.lx.command.perform(new LXCommand.Channel.ReloadPattern(getEngine(), this));
+  }
+
   private static final String KEY_EFFECTS = "effects";
 
   @Override
@@ -815,6 +831,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     this.enabled.removeListener(this.onEnabled);
     this.autoMute.removeListener(this.onAutoMute);
     this.compositeBlend.removeListener(this.onCompositeBlend);
+    this.label.removeListener(this.onRename);
     super.dispose();
     disposeCompositeBlendOptions();
     this.listeners.forEach(listener -> LX.warning("Stranded LXPattern.Listener: " + listener));

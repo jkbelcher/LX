@@ -104,9 +104,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     new DiscreteParameter("Aux", 1)
     .setDescription("Which channel is currently focused in the auxiliary UI");
 
-  public final CompoundParameter crossfader = new CompoundParameter("Crossfader", 0.5)
-  .setDescription("Applies blending between output groups A and B")
-  .setPolarity(LXParameter.Polarity.BIPOLAR);
+  public final CompoundParameter crossfader =
+    new CompoundParameter("Crossfader", 0.5)
+    .setUnits(CompoundParameter.Units.PERCENT_NORMALIZED)
+    .setDescription("Applies blending between output groups A and B")
+    .setPolarity(LXParameter.Polarity.BIPOLAR);
 
   public final ObjectParameter<LXBlend> crossfaderBlendMode;
   private LXBlend activeCrossfaderBlend;
@@ -128,11 +130,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     .setDescription("Enables aux preview of crossfade group B");
 
   public final BooleanParameter autoMuteDefault =
-    new BooleanParameter("Auto-Mute Default", false)
+    new BooleanParameter("Auto-Mute Default", true)
     .setDescription("Whether new channels have Auto-Mute enabled by default");
 
   public final BooleanParameter autoMutePatternDefault =
-    new BooleanParameter("Auto-Mute Pattern Default", false)
+    new BooleanParameter("Auto-Mute Pattern Default", true)
     .setDescription("Whether new rack patterns have Auto-Mute enabled by default");
 
   public final ModelBuffer backgroundBlack;
@@ -966,8 +968,13 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     }
 
     void blend(LXBlend blend, int[] src, double alpha, LXModel model) {
-      blend.blend(this.destination, src, alpha, this.output, model);
-      this.destination = this.output;
+      if (model == lx.getModel()) {
+        // Potential 4-6x speedup per Andrew Look's benchmarks
+        blend(blend, src, alpha, 0, model.size);
+      } else {
+        blend.blend(this.destination, src, alpha, this.output, model);
+        this.destination = this.output;
+      }
     }
 
     void blend(LXBlend blend, int[] src, double alpha, int start, int num) {
@@ -1297,6 +1304,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
         }
       }
     }
+    _removeRemoteControls(container.getParent(), component);
   }
 
   private static final String KEY_CHANNELS = "channels";
@@ -1310,7 +1318,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
   @Override
   public void load(LX lx, JsonObject obj) {
     if (obj.has(KEY_RESET)) {
-      this.parameters.reset();
+      for (LXParameter p : this.parameters.values()) {
+        if (p != this.label) {
+          p.reset();
+        }
+      }
     }
 
     // Add the new channels
@@ -1324,10 +1336,20 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Load the parameters after restoring the channels!
     super.load(lx, obj);
 
+    // Legacy compatibility, projects saved before auto-mute default existed use false
+    if (obj.has(LXComponent.KEY_PARAMETERS)) {
+      if (!LXSerializable.Utils.hasParameter(obj, this.autoMuteDefault.getPath())) {
+        this.autoMuteDefault.setValue(false);
+      }
+      if (!LXSerializable.Utils.hasParameter(obj, this.autoMutePatternDefault.getPath())) {
+        this.autoMutePatternDefault.setValue(false);
+      }
+    }
+
     // Notify all the active patterns
-    for (LXAbstractChannel channel : this.channels) {
-      if (channel instanceof LXChannel) {
-        LXPattern pattern = ((LXChannel) channel).getActivePattern();
+    for (LXAbstractChannel bus : this.channels) {
+      if (bus instanceof LXChannel channel) {
+        LXPattern pattern = channel.getActivePattern();
         if (pattern != null) {
           pattern.activate(LXMixerEngine.patternFriendAccess);
         }
