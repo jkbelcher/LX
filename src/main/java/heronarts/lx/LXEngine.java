@@ -59,6 +59,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.gson.JsonObject;
+import heronarts.lx.utils.LXUtils;
 
 /**
  * The engine is the core class that runs the internal animations. An engine is
@@ -81,7 +82,16 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     }
   }
 
-  public RenderMode renderMode = RenderMode.CPU;
+  public final RenderMode renderMode = getSystemRenderMode();
+
+  /**
+   * Check system properties for experimental GPU mode
+   * To use, pass the VM option "-Dgpu"
+   */
+  static private RenderMode getSystemRenderMode() {
+    String gpuMixer = System.getProperty("gpu");
+    return gpuMixer != null ? RenderMode.GPU : RenderMode.CPU;
+  }
 
   public enum ThreadMode {
     SCHEDULED_EXECUTOR_SERVICE,
