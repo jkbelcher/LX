@@ -18,6 +18,7 @@
 
 package heronarts.lx.mixer;
 
+import heronarts.lx.GpuDevice;
 import heronarts.lx.LX;
 import heronarts.lx.LXBuffer;
 import heronarts.lx.LXComponent;
@@ -1048,6 +1049,11 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
 
       // Run active pattern
       if (activePattern != null) {
+        // JKB: In GPU mode, clear the buffer for Java patterns
+        if (this.lx.engine.renderMode.gpu && !(activePattern instanceof GpuDevice)) {
+          blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+        }
+
         activePattern.setBuffer(blendBuffer);
         activePattern.setModel(activePattern.getModelView());
         activePattern.loop(deltaMs);
@@ -1063,6 +1069,12 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
         this.autoCycleProgress = 1.;
         this.transitionProgress = (this.lx.engine.nowMillis - this.transitionMillis) / (1000 * this.transitionTimeSecs.getValue());
         final LXPattern nextPattern = getNextPattern();
+
+        // JKB: In GPU mode, clear the buffer for Java patterns
+        if (this.lx.engine.renderMode.gpu && !(nextPattern instanceof GpuDevice)) {
+          renderBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+        }
+
         nextPattern.setBuffer(this.renderBuffer);
         nextPattern.setModel(nextPattern.getModelView());
         nextPattern.loop(deltaMs);
