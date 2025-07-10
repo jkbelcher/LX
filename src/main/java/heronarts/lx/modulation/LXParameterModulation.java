@@ -223,14 +223,17 @@ public abstract class LXParameterModulation extends LXComponent {
       if (parameter != null) {
         return parameter;
       }
-      LX.error("Failed to locate parameter at " + obj.get(KEY_PATH).getAsString() + " in scope " + scope.getParent());
+      LX.error("LXParameterModulation.getParameter() failed for path " + obj.get(KEY_PATH).getAsString() + " in scope " + scope.getParent());
     }
     if (obj.has(KEY_ID)) {
       return (LXParameter) lx.getProjectComponent(obj.get(KEY_ID).getAsInt());
     }
-    LXComponent component = lx.getProjectComponent(obj.get(KEY_COMPONENT_ID).getAsInt());
-    String path = obj.get(KEY_PARAMETER_PATH).getAsString();
-    return component.getParameter(path);
+    if (obj.has(KEY_COMPONENT_ID)) {
+      LXComponent component = lx.getProjectComponent(obj.get(KEY_COMPONENT_ID).getAsInt());
+      String path = obj.get(KEY_PARAMETER_PATH).getAsString();
+      return component.getParameter(path);
+    }
+    return null;
   }
 
   @Override
@@ -242,8 +245,7 @@ public abstract class LXParameterModulation extends LXComponent {
   @Override
   public void save(LX lx, JsonObject obj) {
     JsonObject sourceObj = new JsonObject();
-    if (this.source instanceof LXComponent) {
-      LXComponent sourceComponent = (LXComponent) this.source;
+    if (this.source instanceof LXComponent sourceComponent) {
       sourceObj.addProperty(KEY_ID, sourceComponent.getId());
     } else {
       sourceObj.addProperty(KEY_COMPONENT_ID, this.source.getParent().getId());
@@ -258,6 +260,45 @@ public abstract class LXParameterModulation extends LXComponent {
     targetObj.addProperty(KEY_PATH, this.target.getCanonicalPath(this.scope.getParent()));
     obj.add(KEY_TARGET, targetObj);
     super.save(lx, obj);
+  }
+
+  public static JsonObject move(JsonObject obj, LXModulationEngine scope, Map<String, String> pathChanges, LXComponent moved) {
+    if ((moved != null) && !moved.isDescendant(scope.getParent())) {
+      LX.debug("Modulation cannot be restored, component (" + moved.getCanonicalPath() + ") moved out of modulation scope (" + scope.getCanonicalPath() + ")");
+      return null;
+    }
+
+    final String prefix = scope.getParent().getCanonicalPath();
+
+    final JsonObject move = obj.deepCopy();
+    final JsonObject source = move.getAsJsonObject(KEY_SOURCE);
+    final JsonObject target = move.getAsJsonObject(KEY_TARGET);
+
+    String sourcePath = source.get(KEY_PATH).getAsString();
+    String targetPath = target.get(KEY_PATH).getAsString();
+    boolean checkSource = true;
+    boolean checkTarget = true;
+
+    for (Map.Entry<String, String> entry : pathChanges.entrySet()) {
+      String fromPath = entry.getKey();
+      String toPath = entry.getValue();
+      if (prefix != null) {
+        fromPath = LXPath.stripPrefix(fromPath, prefix);
+        toPath = LXPath.stripPrefix(toPath, prefix);
+      }
+      if (checkSource && sourcePath.startsWith(fromPath)) {
+        sourcePath = toPath + sourcePath.substring(fromPath.length());
+        checkSource = false;
+      }
+      if (checkTarget && targetPath.startsWith(fromPath)) {
+        targetPath = toPath + targetPath.substring(fromPath.length());
+        checkTarget = false;
+      }
+    }
+
+    source.addProperty(KEY_PATH, sourcePath);
+    target.addProperty(KEY_PATH, targetPath);
+    return move;
   }
 
 }

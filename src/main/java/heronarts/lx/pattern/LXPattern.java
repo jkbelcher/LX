@@ -33,6 +33,7 @@ import heronarts.lx.LXDeviceComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.LXTime;
 import heronarts.lx.blend.LXBlend;
+import heronarts.lx.command.LXCommand;
 import heronarts.lx.effect.LXEffect;
 import heronarts.lx.midi.LXShortMessage;
 import heronarts.lx.mixer.LXChannel;
@@ -256,6 +257,13 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
   };
 
+  private final LXParameterListener onRename = p -> {
+    final LXPatternEngine engine = getEngine();
+    if (engine != null) {
+      engine.patternRenamed.bang();
+    }
+  };
+
   protected double runMs = 0;
 
   private boolean isActive = false;
@@ -303,6 +311,8 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
 
     this.cueActive.addListener(this.onCue);
     this.auxActive.addListener(this.onAux);
+
+    this.label.addListener(this.onRename);
   }
 
   @Override
@@ -768,6 +778,11 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     }
   }
 
+  @Override
+  public void reload() {
+    this.lx.command.perform(new LXCommand.Channel.ReloadPattern(getEngine(), this));
+  }
+
   private static final String KEY_EFFECTS = "effects";
 
   @Override
@@ -816,6 +831,7 @@ public abstract class LXPattern extends LXDeviceComponent implements LXComponent
     this.enabled.removeListener(this.onEnabled);
     this.autoMute.removeListener(this.onAutoMute);
     this.compositeBlend.removeListener(this.onCompositeBlend);
+    this.label.removeListener(this.onRename);
     super.dispose();
     disposeCompositeBlendOptions();
     this.listeners.forEach(listener -> LX.warning("Stranded LXPattern.Listener: " + listener));

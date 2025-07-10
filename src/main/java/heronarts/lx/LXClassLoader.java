@@ -31,6 +31,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -86,6 +87,8 @@ public class LXClassLoader extends URLClassLoader {
     private int numPlugins = 0;
     private int numClasses = 0;
     private int numFailedClasses = 0;
+
+    private final List<Class<?>> classes = new ArrayList<Class<?>>();
 
     private Package(File jarFile) {
       this.jarFile = jarFile;
@@ -180,6 +183,10 @@ public class LXClassLoader extends URLClassLoader {
       return this.versionCompare < 0;
     }
 
+    boolean hasClass(Class<?> clz) {
+      return this.classes.contains(clz);
+    }
+
     public boolean hasError() {
       return this.error != null;
     }
@@ -233,7 +240,7 @@ public class LXClassLoader extends URLClassLoader {
     return urls.toArray(new URL[0]);
   }
 
-  private final List<File> jarFiles;
+  final List<File> jarFiles;
 
   protected LXClassLoader(LX lx) {
     this(lx, defaultJarFiles(lx));
@@ -242,7 +249,7 @@ public class LXClassLoader extends URLClassLoader {
   protected LXClassLoader(LX lx, List<File> jarFiles) {
     super(fileListToURLArray(jarFiles), lx.getClass().getClassLoader());
     this.lx = lx;
-    this.jarFiles = jarFiles;
+    this.jarFiles = Collections.unmodifiableList(jarFiles);
   }
 
   protected void load() {
@@ -412,6 +419,7 @@ public class LXClassLoader extends URLClassLoader {
     ++pack.numClasses;
     this.duplicates.put(className, pack);
     this.classes.add(clz);
+    pack.classes.add(clz);
     this.lx.registry.addClass(clz, pack);
   }
 
