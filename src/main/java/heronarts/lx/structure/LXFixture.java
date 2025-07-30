@@ -1314,8 +1314,12 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
     throw new IllegalArgumentException("Point index " + i + " exceeds fixture bounds: " + this + " (" + totalSize() + ")");
   }
 
-  protected abstract String getLXFType();
-  protected void addLXFFields(JsonObject obj) {}
+  protected String getLXFType() {
+    return JsonFixture.TYPE_CLASS;
+  }
+
+  protected void addLXFFields(JsonObject obj, JsonObject parameters) {}
+
   protected void addLXFOutputs(JsonObject obj, JsonObject parameters) {}
 
   protected final JsonObject toLXFComponent(JsonObject parameters) {
@@ -1339,7 +1343,9 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
 
     final String type = getLXFType();
     obj.addProperty(JsonFixture.KEY_TYPE, type);
-    if (type.equals(JsonFixture.TYPE_CLASS)) {
+
+    final boolean isNative = type.equals(JsonFixture.TYPE_CLASS);
+    if (isNative) {
       obj.addProperty(JsonFixture.KEY_CLASS, getClass().getName());
     }
 
@@ -1353,8 +1359,11 @@ public abstract class LXFixture extends LXComponent implements LXFixtureContaine
       obj.addProperty(JsonFixture.KEY_POINT_SIZE, this.pointSize.getValue());
     }
 
-    addLXFFields(obj);
-    addLXFOutputs(obj, parameters);
+    addLXFFields(obj, parameters);
+
+    if (!isNative) {
+      addLXFOutputs(obj, parameters);
+    }
 
     return obj;
   }
