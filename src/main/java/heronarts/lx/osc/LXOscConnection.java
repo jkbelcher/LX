@@ -21,6 +21,8 @@ package heronarts.lx.osc;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.List;
 
 import heronarts.lx.LX;
 import heronarts.lx.LXComponent;
@@ -67,6 +69,8 @@ public abstract class LXOscConnection extends LXComponent {
   public final StringParameter filter =
     new StringParameter("Filter", "/lx")
     .setDescription("Filter OSC messages on matching prefix");
+
+  private final List<String> parsedFilters = new ArrayList<>();
 
   private int _defaultInputPort() {
     int max = lx.engine.osc.receivePort.getValuei();
@@ -131,8 +135,18 @@ public abstract class LXOscConnection extends LXComponent {
     addParameter("active", this.active);
   }
 
-  protected String getFilter() {
-    return this.hasFilter.isOn() ? this.filter.getString() : null;
+  protected List<String> getFilters() {
+    return this.hasFilter.isOn() ? this.parsedFilters : null;
+  }
+
+  protected void parseFilterString(String filter) {
+    this.parsedFilters.clear();
+    for (String split : filter.split(",")) {
+      split = split.trim();
+      if (!split.isEmpty()) {
+        this.parsedFilters.add(split);
+      }
+    }
   }
 
   /**
@@ -171,6 +185,8 @@ public abstract class LXOscConnection extends LXComponent {
         } else {
           stopReceiver(IOState.STOPPED);
         }
+      } else if (p == this.filter) {
+        this.parseFilterString(this.filter.getString());
       }
     }
 
@@ -259,6 +275,8 @@ public abstract class LXOscConnection extends LXComponent {
           // can easily toggle back on
           this.state.setValue(IOState.STOPPED);
         }
+      } else if (p == this.filter) {
+        this.parseFilterString(this.filter.getString());
       }
     }
 
