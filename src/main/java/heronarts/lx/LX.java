@@ -70,7 +70,7 @@ import com.google.gson.stream.JsonWriter;
  */
 public class LX {
 
-  public static final String VERSION = "1.1.1-TE.3.GPU-SNAPSHOT";
+  public static final String VERSION = "1.1.1-TE.4.GPU-SNAPSHOT";
 
   public static class InstantiationException extends Exception {
 
