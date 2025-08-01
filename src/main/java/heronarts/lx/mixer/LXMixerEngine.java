@@ -1258,13 +1258,13 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Experimental GPU mixing mode
     if (this.lx.engine.renderMode.gpu) {
       for (PostMixer postMixer : this.postMixers) {
-        postMixer.postMix(render.getMain(), render.getCue(), render.getAux());
+        postMixer.postMix(render, deltaMs);
       }
     }
   }
 
   public interface PostMixer {
-    public void postMix(int[] main, int[] cue, int[] aux);
+    public void postMix(LXEngine.Frame frame, double deltaMs);
   }
 
   private final List<PostMixer> postMixers = new ArrayList<>();
