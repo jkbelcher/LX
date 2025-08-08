@@ -73,6 +73,10 @@ public class LXOscEngine extends LXComponent {
     public void outputRemoved(LXOscEngine osc, LXOscConnection.Output output);
   }
 
+  public interface TransmissionListener {
+    public void oscMessageTransmitted(OscPacket packet);
+  }
+
   public enum IOState {
     STOPPED,
     BINDING,
@@ -162,6 +166,9 @@ public class LXOscEngine extends LXComponent {
 
   private final List<LXOscListener> listeners =
     new ArrayList<LXOscListener>();
+
+  private final List<TransmissionListener> transmissionListeners =
+    new ArrayList<TransmissionListener>();
 
   private final LXOscQueryServer oscQueryServer;
   private final Zeroconf zeroconf;
@@ -317,6 +324,27 @@ public class LXOscEngine extends LXComponent {
     return this;
   }
 
+  public LXOscEngine addTransmissionListener(TransmissionListener listener) {
+    Objects.requireNonNull("May not add null TransmissionListener");
+    if (this.transmissionListeners.contains(listener)) {
+      throw new IllegalStateException(
+        "Cannot add duplicate LXOscEngine.TransmissionListener: "
+          + listener);
+    }
+    this.transmissionListeners.add(listener);
+    return this;
+  }
+
+  public LXOscEngine removeTransmissionListener(TransmissionListener listener) {
+    if (!this.transmissionListeners.contains(listener)) {
+      throw new IllegalStateException(
+        "Cannot remove non-existent LXOscEngine.TransmissionListener: "
+          + listener);
+    }
+    this.transmissionListeners.remove(listener);
+    return this;
+  }
+
   public LXOscEngine sendMessage(String path, int value) {
     if (this.engineTransmitter != null) {
       this.engineTransmitter.sendMessage(path, value);
@@ -468,10 +496,21 @@ public class LXOscEngine extends LXComponent {
       if (this.activity != null) {
         this.activity.trigger();
       }
+      
       this.buffer.rewind();
       packet.serialize(this.buffer);
       this.packet.setLength(this.buffer.position());
       this.socket.send(this.packet);
+
+      // Notify transmission listeners
+      for (TransmissionListener listener : transmissionListeners) {
+        try {
+          listener.oscMessageTransmitted(packet);
+        } catch (Exception e) {
+          // Log error but continue with transmission
+          error(e, "Error in TransmissionListener: " + e.getMessage());
+        }
+      }
     }
 
     public void setPort(int port) {
