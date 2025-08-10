@@ -167,8 +167,8 @@ public class LXOscEngine extends LXComponent {
   private final List<IOListener> ioListeners =
     new ArrayList<IOListener>();
 
-  private final List<LXOscListener> listeners
-    = new ArrayList<>();
+  private final List<LXOscListener> listeners =
+    new ArrayList<LXOscListener>();
 
   private final List<MessageListener> messageListeners = new ArrayList<>();
 
