@@ -73,6 +73,13 @@ public class LXOscEngine extends LXComponent {
     public void outputRemoved(LXOscEngine osc, LXOscConnection.Output output);
   }
 
+  public interface MessageListener {
+    // Listeners may send variations of a message by calling sendMessageVariant
+    default public void willSend(String path, int value) {}
+    default public void willSend(String path, float value) {}
+    default public void willSend(String path, String value) {}
+  }
+
   public enum IOState {
     STOPPED,
     BINDING,
@@ -162,6 +169,8 @@ public class LXOscEngine extends LXComponent {
 
   private final List<LXOscListener> listeners =
     new ArrayList<LXOscListener>();
+
+  private final List<MessageListener> messageListeners = new ArrayList<>();
 
   private final LXOscQueryServer oscQueryServer;
   private final Zeroconf zeroconf;
@@ -317,31 +326,64 @@ public class LXOscEngine extends LXComponent {
     return this;
   }
 
+  public LXOscEngine addMessageListener(MessageListener listener) {
+    Objects.requireNonNull(listener, "May not add null MessageListener");
+    if (this.messageListeners.contains(listener)) {
+      throw new IllegalStateException(
+        "Cannot add duplicate LXOscEngine.MessageListener: " + listener);
+    }
+    this.messageListeners.add(listener);
+    return this;
+  }
+
+  public LXOscEngine removeMessageListener(MessageListener listener) {
+    if (!this.messageListeners.contains(listener)) {
+      throw new IllegalStateException(
+        "Cannot remove non-existent LXOscEngine.MessageListener: "
+          + listener);
+    }
+    this.messageListeners.remove(listener);
+    return this;
+  }
+
   public LXOscEngine sendMessage(String path, int value) {
-    if (this.engineTransmitter != null) {
-      this.engineTransmitter.sendMessage(path, value);
-    }
-    for (LXOscConnection.Output output : this.outputs) {
-      if (output.transmitter != null) {
-        output.transmitter.sendMessage(path, value);
-      }
-    }
+    splitMessage(path, value);
+    _sendMessage(path, value);
     return this;
   }
 
   public LXOscEngine sendMessage(String path, float value) {
-    if (this.engineTransmitter != null) {
-      this.engineTransmitter.sendMessage(path, value);
-    }
-    for (LXOscConnection.Output output : this.outputs) {
-      if (output.transmitter != null) {
-        output.transmitter.sendMessage(path, value);
-      }
-    }
+    splitMessage(path, value);
+    _sendMessage(path, value);
     return this;
   }
 
   public LXOscEngine sendMessage(String path, String value) {
+    splitMessage(path, value);
+    _sendMessage(path, value);
+    return this;
+  }
+
+  /**
+   * MessageListeners may use this method to send variations of an OSC message, which could have
+   * a modified path or value. Messages sent here will NOT get passed through MessageListeners.
+   */
+  public LXOscEngine sendMessageVariant(String path, int value) {
+    _sendMessage(path, value);
+    return this;
+  }
+
+  public LXOscEngine sendMessageVariant(String path, float value) {
+    _sendMessage(path, value);
+    return this;
+  }
+
+  public LXOscEngine sendMessageVariant(String path, String value) {
+    _sendMessage(path, value);
+    return this;
+  }
+
+  private void _sendMessage(String path, int value) {
     if (this.engineTransmitter != null) {
       this.engineTransmitter.sendMessage(path, value);
     }
@@ -350,10 +392,32 @@ public class LXOscEngine extends LXComponent {
         output.transmitter.sendMessage(path, value);
       }
     }
-    return this;
+  }
+
+  private void _sendMessage(String path, float value) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, value);
+    }
+    for (LXOscConnection.Output output : this.outputs) {
+      if (output.transmitter != null) {
+        output.transmitter.sendMessage(path, value);
+      }
+    }
+  }
+
+  private void _sendMessage(String path, String value) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, value);
+    }
+    for (LXOscConnection.Output output : this.outputs) {
+      if (output.transmitter != null) {
+        output.transmitter.sendMessage(path, value);
+      }
+    }
   }
 
   public LXOscEngine sendParameter(LXParameter parameter) {
+    splitParameter(parameter);
     if (this.engineTransmitter != null) {
       this.engineTransmitter.onParameterChanged(parameter);
     }
@@ -363,6 +427,71 @@ public class LXOscEngine extends LXComponent {
       }
     }
     return this;
+  }
+
+  private boolean inSplit = false;
+
+  private void splitMessage(String path, int value) {
+    if (this.inSplit) {
+      throw new IllegalStateException(
+        "MessageListeners may ONLY call sendMessageVariant(), they may NOT call sendMessage() or modify parameters");
+    }
+    this.inSplit = true;
+    for (MessageListener listener : this.messageListeners) {
+      listener.willSend(path, value);
+    }
+    this.inSplit = false;
+  }
+
+  private void splitMessage(String path, float value) {
+    if (this.inSplit) {
+      throw new IllegalStateException(
+        "MessageListeners may ONLY call sendMessageVariant(), they may NOT call sendMessage() or modify parameters");
+    }
+    this.inSplit = true;
+    for (MessageListener listener : this.messageListeners) {
+      listener.willSend(path, value);
+    }
+    this.inSplit = false;
+  }
+
+  private void splitMessage(String path, String value) {
+    if (this.inSplit) {
+      throw new IllegalStateException(
+        "MessageListeners may ONLY call sendMessageVariant(), they may NOT call sendMessage() or modify parameters");
+    }
+    this.inSplit = true;
+    for (MessageListener listener : this.messageListeners) {
+      listener.willSend(path, value);
+    }
+    this.inSplit = false;
+  }
+
+  /** Split a parameterChanged event into float/int/String for MessageListeners */
+  private void splitParameter(LXParameter parameter) {
+    final String address = getOscAddress(parameter);
+    if (address == null) {
+      return;
+    }
+
+    // Duplicate logic from EngineTransmitter.onParameterChanged
+    if (parameter instanceof BooleanParameter b) {
+      splitMessage(address, b.isOn() ? 1 : 0);
+    } else if (parameter instanceof StringParameter string) {
+      splitMessage(address, string.getString());
+    } else if (parameter instanceof ColorParameter color) {
+      splitMessage(address, color.getBaseColor());
+    } else if (parameter instanceof DiscreteParameter discrete) {
+      splitMessage(address, discrete.getBaseValuei());
+    } else if (parameter instanceof LXNormalizedParameter normalizedParameter) {
+      if (normalizedParameter.getOscMode() == LXNormalizedParameter.OscMode.ABSOLUTE) {
+        splitMessage(address, normalizedParameter.getBaseValuef());
+      } else {
+        splitMessage(address, normalizedParameter.getBaseNormalizedf());
+      }
+    } else {
+      splitMessage(address, parameter.getBaseValuef());
+    }
   }
 
   /**
@@ -1131,6 +1260,8 @@ public class LXOscEngine extends LXComponent {
     super.dispose();
     this.listeners.forEach(listener -> LX.warning("Stranged LXOscEngine.Listener: " + listener));
     this.listeners.clear();
+    this.messageListeners.forEach(listener -> LX.warning("Stranded LXOscEngine.MessageListener: " + listener));
+    this.messageListeners.clear();
     if (this.engineTransmitter != null) {
       this.engineTransmitter.dispose();
     }
