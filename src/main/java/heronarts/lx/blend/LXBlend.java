@@ -19,7 +19,7 @@
 package heronarts.lx.blend;
 
 import heronarts.lx.LX;
-import heronarts.lx.LXBuffer;
+import heronarts.lx.LXPointBuffer;
 import heronarts.lx.LXComponent;
 import heronarts.lx.LXModulatorComponent;
 import heronarts.lx.color.LXColor;
@@ -124,8 +124,8 @@ public abstract class LXBlend extends LXModulatorComponent {
     return getName();
   }
 
-  public void blend(int[] dst, int[] src, double alpha, LXBuffer buffer, LXModel model) {
-    blend(dst, src, alpha, buffer.getArray(), model);
+  public void blend(int[] dst, int[] src, double alpha, LXPointBuffer buffer, LXModel model) {
+    blend(dst, src, alpha, buffer.getBuffer(), model);
   }
 
   /**

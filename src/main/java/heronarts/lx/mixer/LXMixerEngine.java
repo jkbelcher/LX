@@ -146,7 +146,6 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     .setDescription("Whether new rack patterns have Auto-Mute enabled by default");
 
   public final ModelBuffer backgroundBlack;
-  public final ModelBuffer backgroundTransparent;
   private final ModelBuffer blendBufferLeft;
   private final ModelBuffer blendBufferRight;
 
@@ -166,8 +165,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     super(lx, "Mixer");
 
     // Background and blending buffers
-    this.backgroundBlack = new ModelBuffer(lx, LXColor.BLACK);
-    this.backgroundTransparent = new ModelBuffer(lx, 0);
+    this.backgroundBlack = new ModelBuffer(lx);
     this.blendBufferLeft = new ModelBuffer(lx);
     this.blendBufferRight = new ModelBuffer(lx);
     LX.initProfiler.log("Engine: Mixer: Buffers");
@@ -1028,11 +1026,12 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     final long channelStart = System.nanoTime();
 
     // Initialize blend stacks
-    this.blendStackMain.initialize(this.backgroundBlack.getArray(), render.getMain());
-    this.blendStackCue.initialize(this.backgroundBlack.getArray(), render.getCue());
-    this.blendStackAux.initialize(this.backgroundBlack.getArray(), render.getAux());
-    this.blendStackLeft.initialize(this.backgroundBlack.getArray(), this.blendBufferLeft.getArray());
-    this.blendStackRight.initialize(this.backgroundBlack.getArray(), this.blendBufferRight.getArray());
+    // TODO: change how these are initialized since there's more than one buffer inside each ModelBuffer?
+    this.blendStackMain.initialize(this.backgroundBlack.getColors(), render.getMain().getColors());
+    this.blendStackCue.initialize(this.backgroundBlack.getColors(), render.getCue().getColors());
+    this.blendStackAux.initialize(this.backgroundBlack.getColors(), render.getAux().getColors());
+    this.blendStackLeft.initialize(this.backgroundBlack.getColors(), this.blendBufferLeft.getColors());
+    this.blendStackRight.initialize(this.backgroundBlack.getColors(), this.blendBufferRight.getColors());
 
     final double crossfadeValue = this.crossfader.getValue();
 
@@ -1234,7 +1233,7 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     // Step 6: Time to apply master FX to the main blended output
     long effectStart = System.nanoTime();
     for (LXEffect effect : this.masterBus.getEffects()) {
-      effect.setBuffer(render);
+      effect.setBuffer(render.getMain());
       effect.setModel(effect.getModelView());
       effect.loop(deltaMs);
     }

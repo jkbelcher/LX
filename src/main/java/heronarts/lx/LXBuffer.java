@@ -18,18 +18,36 @@
 
 package heronarts.lx;
 
-public interface LXBuffer {
-  public int[] getArray();
+import heronarts.lx.model.LXModel;
+import heronarts.lx.structure.LXFixture;
 
-  public default LXBuffer copyTo(LXBuffer that) {
-    final int[] array = getArray();
-    System.arraycopy(array, 0, that.getArray(), 0, array.length);
-    return this;
-  }
+/**
+ * Generic buffer interface allows any underlying data type
+ */
+public interface LXBuffer<T> {
 
-  public default LXBuffer copyFrom(LXBuffer that) {
-    final int[] array = getArray();
-    System.arraycopy(that.getArray(), 0, array, 0, array.length);
-    return this;
-  }
+  /** Model has changed. Buffer should re-allocate to accommodate the new model size */
+  public void initialize(LXModel model);
+
+  public void clear(boolean startOfFrame);
+
+  public void muteFixture(LXFixture fixture);
+
+  public void colorFixture(LXFixture fixture, int color);
+
+  /** Structure-level mute */
+  public void mute();
+
+  /** Structure-level all white */
+  public void allWhite();
+
+  public T getBuffer();
+
+  // TODO: remove copyTo? It is not used.
+  // public LXBuffer<T> copyTo(LXBuffer<T> that);
+
+  public void copyFrom(T that);
+
+  public default void dispose() { }
+
 }

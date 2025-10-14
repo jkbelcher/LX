@@ -75,7 +75,8 @@ public class BlurEffect extends LXEffect {
 
   public BlurEffect(LX lx) {
     super(lx);
-    this.blurBuffer = new ModelBuffer(lx, LXColor.BLACK);
+    this.blurBuffer = new ModelBuffer(lx);
+    this.blurBuffer.clear(false);
     addParameter("level", this.level);
     addParameter("decay", this.decay);
     addParameter("decayFactor", this.decayFactor);
@@ -84,7 +85,7 @@ public class BlurEffect extends LXEffect {
 
   @Override
   protected void onEnable() {
-    int[] blurArray = this.blurBuffer.getArray();
+    int[] blurArray = this.blurBuffer.getColors();
     for (int i = 0; i < blurArray.length; ++i) {
       blurArray[i] = LXColor.BLACK;
     }
@@ -107,7 +108,7 @@ public class BlurEffect extends LXEffect {
   @Override
   public void run(double deltaMs, double amount) {
     final int blurAlpha = (int) (LXColor.BLEND_ALPHA_FULL * amount * this.level.getValue());
-    final int[] blurColors = this.blurBuffer.getArray();
+    final int[] blurColors = this.blurBuffer.getColors();
 
     final double decayScale = Math.pow(this.decayFactor.getValue(), deltaMs / (1000 * this.decay.getValue()));
     final int decayColor = LXColor.grayn(decayScale);

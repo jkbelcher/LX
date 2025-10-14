@@ -108,7 +108,7 @@ public class SoundObjectEffect extends LXEffect {
     final boolean cueMask = this.cueMask.isOn();
     enabledAmount *= this.maskDepth.getValue();
     if (cueMask || (enabledAmount > 0)) {
-      final int[] blend = this.blendBuffer.getArray();
+      final int[] blend = this.blendBuffer.getColors();
       this.engine.run(this.model, blend, deltaMs);
       if (cueMask) {
         for (LXPoint p : model.points) {
