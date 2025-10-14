@@ -143,7 +143,7 @@ public class FreezeEffect extends LXEffect {
 
   @Override
   protected void run(double deltaMs, double enabledAmount) {
-    final int[] array = this.buffer.getArray();
+    final int[] array = this.buffer.getColors();
     if (this.capture) {
       for (LXPoint p : model.points) {
         array[p.index] = colors[p.index];

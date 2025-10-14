@@ -34,7 +34,7 @@ import java.util.List;
  */
 public abstract class LXLayeredComponent extends LXModelComponent implements LXLoopTask {
 
-  private LXBuffer buffer = null;
+  private ModelBuffer buffer = null;
 
   protected int[] colors = null;
 
@@ -47,46 +47,46 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   protected final LXPalette palette;
 
   protected LXLayeredComponent(LX lx) {
-    this(lx, null, (LXBuffer) null);
+    this(lx, null, null);
   }
 
   protected LXLayeredComponent(LX lx, String label) {
-    this(lx, label, (LXBuffer) null);
+    this(lx, label, null);
   }
 
   protected LXLayeredComponent(LX lx, LXDeviceComponent component) {
     this(lx, null, component.getBuffer());
   }
 
-  protected LXLayeredComponent(LX lx, LXBuffer buffer) {
+  protected LXLayeredComponent(LX lx, ModelBuffer buffer) {
     this(lx, null, buffer);
   }
 
-  protected LXLayeredComponent(LX lx, String label, LXBuffer buffer) {
+  protected LXLayeredComponent(LX lx, String label, ModelBuffer buffer) {
     super(lx, label);
     this.palette = lx.engine.palette;
     if (buffer != null) {
       this.buffer = buffer;
-      this.colors = buffer.getArray();
+      this.colors = buffer.getColors();
     }
     addArray("layer", this.layers);
   }
 
-  protected LXBuffer getBuffer() {
+  protected ModelBuffer getBuffer() {
     return this.buffer;
   }
 
   public int[] getColors() {
-    return getBuffer().getArray();
+    return getBuffer().getColors();
   }
 
   protected LXLayeredComponent setBuffer(LXDeviceComponent component) {
     return setBuffer(component.getBuffer());
   }
 
-  public LXLayeredComponent setBuffer(LXBuffer buffer) {
+  public LXLayeredComponent setBuffer(ModelBuffer buffer) {
     this.buffer = buffer;
-    this.colors = buffer.getArray();
+    this.colors = buffer.getColors();
     return this;
   }
 
@@ -100,7 +100,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
     // reference. Even if a doofus assigns colors to something else, we'll reset it
     // here on each pass of the loop. Better than subclasses having to call getColors()
     // all the time.
-    this.colors = this.buffer.getArray();
+    this.colors = this.buffer.getColors();
 
     super.loop(deltaMs);
     onLoop(deltaMs);

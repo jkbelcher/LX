@@ -458,7 +458,7 @@ public class LXChannel extends LXAbstractChannel implements LXPatternEngine.Cont
     }
 
     // Run the pattern engine
-    this.colors = this.blendBuffer.getArray();
+    this.colors = this.blendBuffer.getColors();
     this.patternEngine.loop(this.blendBuffer, getModelView(), deltaMs);
     this.profiler.loopNanos = System.nanoTime() - loopStart;
 

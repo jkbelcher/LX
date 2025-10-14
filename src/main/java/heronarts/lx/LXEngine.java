@@ -48,7 +48,6 @@ import heronarts.lx.structure.view.LXViewDefinition;
 import java.io.File;
 import java.net.SocketException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -227,26 +226,28 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
   // Buffer for a single frame, which was rendered with
   // a particular model state, has a main view along with
   // a cue and auxiliary view, as well as cue/aux view state
-  public static class Frame implements LXBuffer {
+  public static class Frame {
 
     private LXModel model;
-    private int[] main = null;
-    private int[] cue = null;
-    private int[] aux = null;
+    private ModelBuffer main = null;
+    private ModelBuffer cue = null;
+    private ModelBuffer aux = null;
     private boolean cueOn = false;
     private boolean auxOn = false;
 
     public Frame(LX lx) {
+      this.main = new ModelBuffer(lx);
+      this.cue = new ModelBuffer(lx);
+      this.aux = new ModelBuffer(lx);
       setModel(lx.getModel());
     }
 
     public void setModel(LXModel model) {
       this.model = model;
-      if ((this.main == null) || (this.main.length != model.size)) {
-        this.main = new int[model.size];
-        this.cue = new int[model.size];
-        this.aux = new int[model.size];
-      }
+      // TODO: maybe these three ModelBuffers should not also be listening to lx.modelChanged?
+      this.main.setModel(model);
+      this.cue.setModel(model);
+      this.aux.setModel(model);
     }
 
     public void setCueOn(boolean cueOn) {
@@ -261,41 +262,37 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       setModel(that.model);
       this.cueOn = that.cueOn;
       this.auxOn = that.auxOn;
-      System.arraycopy(that.main, 0, this.main, 0, this.main.length);
-      System.arraycopy(that.cue, 0, this.cue, 0, this.cue.length);
-      System.arraycopy(that.aux, 0, this.aux, 0, this.aux.length);
+      this.main.copyFrom(that.main);
+      this.cue.copyFrom(that.cue);
+      this.aux.copyFrom(that.aux);
     }
 
+    // TODO: return ModelBuffer instead of int[]
     public int[] getColors(boolean aux) {
       return aux ? getAuxColors() : getColors();
     }
 
     public int[] getColors() {
-      return this.cueOn ? this.cue : this.main;
+      return this.cueOn ? this.cue.getColors() : this.main.getColors();
     }
 
     public int[] getAuxColors() {
-      return this.auxOn ? this.aux : this.main;
+      return this.auxOn ? this.aux.getColors() : this.main.getColors();
     }
 
     public LXModel getModel() {
       return this.model;
     }
 
-    @Override
-    public int[] getArray() {
+    public ModelBuffer getMain() {
       return this.main;
     }
 
-    public int[] getMain() {
-      return this.main;
-    }
-
-    public int[] getCue() {
+    public ModelBuffer getCue() {
       return this.cue;
     }
 
-    public int[] getAux() {
+    public ModelBuffer getAux() {
       return this.aux;
     }
   }
@@ -1106,8 +1103,8 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     final boolean eulaAccepted = !this.lx.permissions.isEulaRequired() || this.lx.preferences.eulaAccepted.isOn();
     final int maxOutputPoints = this.lx.permissions.getMaxOutputPoints();
     final int maxRenderPoints = this.lx.permissions.getMaxRenderPoints();
-    this.restricted.setValue((maxRenderPoints >= 0) && (this.buffer.render.main.length > maxRenderPoints));
-    this.output.restricted.setValue((maxOutputPoints >= 0) && (this.buffer.render.main.length > maxOutputPoints));
+    this.restricted.setValue((maxRenderPoints >= 0) && (this.buffer.render.main.getColors().length > maxRenderPoints));
+    this.output.restricted.setValue((maxOutputPoints >= 0) && (this.buffer.render.main.getColors().length > maxOutputPoints));
 
     // Run tempo and audio, always using real-time
     this.lx.engine.tempo.loop(deltaMs);
@@ -1145,74 +1142,63 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
       this.mixer.loop(buffer.render, deltaMs);
     } else {
       // Black everything out
-      Arrays.fill(buffer.render.main, LXColor.BLACK);
-      Arrays.fill(buffer.render.cue, LXColor.BLACK);
-      Arrays.fill(buffer.render.aux, LXColor.BLACK);
+      // TODO: JKB note: this was previously clearing to black, which seems to different from
+      // LXPatternEngine's initial clearing to 0. By calling clear(true) I'm now setting it to 0.
+      buffer.render.main.clear(true);
+      buffer.render.cue.clear(true);
+      buffer.render.aux.clear(true);
     }
 
     // Post-pass for any views with cue enabled
     for (LXViewDefinition view : this.lx.structure.views.views) {
       if (view.cueActive.isOn() && (view.getView() != null)) {
-        Arrays.fill(buffer.render.cue, LXColor.BLACK);
+        buffer.render.cue.clear(false);
+        int[] cuePoints = buffer.render.cue.getColors();
         for (LXPoint p : view.getView().points) {
-          buffer.render.cue[p.index] = LXColor.WHITE;
+          cuePoints[p.index] = LXColor.WHITE;
         }
         buffer.render.setCueOn(true);
         break;
       }
     }
 
-    // Add fixture identification very last
-    int identifyColor = LXColor.hsb(0, 100, Math.abs(-100 + (runStart / 8000000) % 200));
-    for (LXFixture fixture : this.lx.structure.fixtures) {
-      if (fixture.deactivate.isOn()) {
-        // Does not apply to deactivated fixtures
-        continue;
-      }
-      if (fixture.mute.isOn()) {
-        int start = fixture.getIndexBufferOffset();
-        int end = start + fixture.totalSize();
-        if (end > start) {
-          for (int i = start; i < end; ++i) {
-            this.buffer.render.main[i] = LXColor.BLACK;
-            this.buffer.render.cue[i] = LXColor.BLACK;
-            this.buffer.render.aux[i] = LXColor.BLACK;
-          }
+    // JKB note: structure-level edits were inside the fixture For loop. I moved them outside the loop.
+    // Finally, structure-level edits
+    if (this.lx.structure.mute.isOn()) {
+      this.buffer.render.main.mute();
+      this.buffer.render.cue.mute();
+      this.buffer.render.aux.mute();
+    } else if (this.lx.structure.allWhite.isOn()) {
+      this.buffer.render.main.allWhite();
+      this.buffer.render.cue.allWhite();
+      this.buffer.render.aux.allWhite();
+    } else {
+      // Add fixture identification very last
+      int identifyColor = LXColor.hsb(0, 100, Math.abs(-100 + (runStart / 8000000) % 200));
+      for (LXFixture fixture : this.lx.structure.fixtures) {
+        if (fixture.deactivate.isOn()) {
+          // Does not apply to deactivated fixtures
+          continue;
         }
-      } else if (fixture.identify.isOn()) {
-        int start = fixture.getIndexBufferOffset();
-        int end = start + fixture.totalSize();
-        if (end > start) {
-          for (int i = start; i < end; ++i) {
-            this.buffer.render.main[i] = identifyColor;
-            this.buffer.render.cue[i] = identifyColor;
-            this.buffer.render.aux[i] = identifyColor;
-          }
+        if (fixture.mute.isOn()) {
+          this.buffer.render.main.muteFixture(fixture);
+          this.buffer.render.cue.muteFixture(fixture);
+          this.buffer.render.aux.muteFixture(fixture);
+        } else if (fixture.identify.isOn()) {
+          this.buffer.render.main.colorFixture(fixture, identifyColor);
+          this.buffer.render.cue.colorFixture(fixture, identifyColor);
+          this.buffer.render.aux.colorFixture(fixture, identifyColor);
         }
-      }
-      if (fixture.solo.isOn()) {
-        int start = fixture.getIndexBufferOffset();
-        int end = start + fixture.totalSize();
-        if (end > start) {
-          for (int i = 0; i < this.buffer.render.main.length; ++i) {
-            if (i < start || i >= end) {
-              this.buffer.render.main[i] = LXColor.BLACK;
-              this.buffer.render.cue[i] = LXColor.BLACK;
-              this.buffer.render.aux[i] = LXColor.BLACK;
+        if (fixture.solo.isOn()) {
+          // TODO: allow multiple solos?
+          for (LXFixture otherFixture : this.lx.structure.fixtures) {
+            if (otherFixture != fixture) {
+              this.buffer.render.main.muteFixture(otherFixture);
+              this.buffer.render.cue.muteFixture(otherFixture);
+              this.buffer.render.aux.muteFixture(otherFixture);
             }
           }
         }
-      }
-
-      // Finally, structure-level edits
-      if (this.lx.structure.mute.isOn()) {
-        Arrays.fill(this.buffer.render.main, LXColor.BLACK);
-        Arrays.fill(this.buffer.render.cue, LXColor.BLACK);
-        Arrays.fill(this.buffer.render.aux, LXColor.BLACK);
-      } else if (this.lx.structure.allWhite.isOn()) {
-        Arrays.fill(this.buffer.render.main, LXColor.WHITE);
-        Arrays.fill(this.buffer.render.cue, LXColor.WHITE);
-        Arrays.fill(this.buffer.render.aux, LXColor.WHITE);
       }
     }
 
@@ -1231,8 +1217,8 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
         // Or do it ourself here on the engine thread
         long outputStart = System.nanoTime();
         Frame sendFrame = this.buffer.copy;
-        int[] sendColors = (this.lx.flags.sendCueToOutput && sendFrame.cueOn) ? sendFrame.cue : sendFrame.main;
-        this.output.send(sendColors);
+        ModelBuffer sendColors = (this.lx.flags.sendCueToOutput && sendFrame.cueOn) ? sendFrame.cue : sendFrame.main;
+        this.output.send(sendColors.getColors());
         this.profiler.outputNanos = System.nanoTime() - outputStart;
       }
     } else {
@@ -1312,7 +1298,7 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
           long copyEnd = System.nanoTime();
           this.timer.copyNanos = copyEnd - copyStart;
           try {
-            output.send(this.networkFrame.main);
+            output.send(this.networkFrame.main.getColors());
           } catch (Throwable x) {
             // TODO(mcslee): For now we don't flag these, there could be ConcurrentModificationException
             // or ArrayIndexBounds exceptions if the model/fixtures are being changed in real-time.

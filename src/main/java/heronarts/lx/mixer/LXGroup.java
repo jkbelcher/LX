@@ -115,8 +115,8 @@ public class LXGroup extends LXAbstractChannel {
 
     // Because of channel views, channel blends may not touch all pixels, so start
     // by splatting transparency onto the group buffer
-    this.blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
-    this.colors = this.blendBuffer.getArray();
+    this.blendBuffer.clear(true);
+    this.colors = this.blendBuffer.getColors();
 
     // Blend all channels that are enabled.
     for (LXChannel channel : this.channels) {

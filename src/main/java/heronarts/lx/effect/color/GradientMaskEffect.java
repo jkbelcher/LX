@@ -80,7 +80,7 @@ public class GradientMaskEffect extends LXEffect {
     final boolean cueMask = this.cueMask.isOn();
 
     // Run the gradient engine
-    final int[] maskColors = this.mask.getArray();
+    final int[] maskColors = this.mask.getColors();
     this.engine.run(deltaMs, this.model, cueMask ? colors : maskColors);
 
     // Mask input colors by the results

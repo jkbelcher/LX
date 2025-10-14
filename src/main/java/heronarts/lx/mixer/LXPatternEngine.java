@@ -19,7 +19,6 @@
 package heronarts.lx.mixer;
 
 import heronarts.lx.LX;
-import heronarts.lx.LXBuffer;
 import heronarts.lx.LXComponent;
 import heronarts.lx.LXSerializable;
 import heronarts.lx.ModelBuffer;
@@ -949,15 +948,16 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
     }
   }
 
-  public void loop(LXBuffer blendBuffer, LXModel modelView, double deltaMs) {
+  public void loop(ModelBuffer blendBuffer, LXModel modelView, double deltaMs) {
     // Initialize buffer colors
-    int[] colors = blendBuffer.getArray();
+    int[] colors = blendBuffer.getColors();
 
     // Initialize colors to transparent. This needs to be done no matter
     // what the mixing mode is, because sub-patterns/effects may render
     // to views that only touch a subset of the channel's view. We don't
     // want to leave old frame cruft in the channel buffer in that case
-    blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
+    blendBuffer.clear(true);
+    // blendBuffer.copyFrom(this.lx.engine.mixer.backgroundTransparent);
 
     if (this.compositeMode.getEnum() == CompositeMode.BLEND) {
 
@@ -1052,7 +1052,8 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
         activePattern.loop(deltaMs);
       } else {
         // No active pattern, black it out!
-        blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
+        blendBuffer.clear(false);
+        // blendBuffer.copyFrom(this.lx.engine.mixer.backgroundBlack);
       }
 
       // Run transition!
@@ -1066,7 +1067,7 @@ public class LXPatternEngine implements LXParameterListener, LXSerializable {
         this.transition.loop(deltaMs);
         this.transition.lerp(
           colors,
-          this.renderBuffer.getArray(),
+          this.renderBuffer.getColors(),
           this.transitionProgress,
           colors,
           modelView
