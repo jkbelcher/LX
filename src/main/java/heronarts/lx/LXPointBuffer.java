@@ -73,8 +73,8 @@ public class LXPointBuffer implements LXBuffer<int[]> {
     return this.buffer;
   }
 
-  public void copyFrom(LXPointBuffer that) {
-    System.arraycopy(that.buffer, 0, this.buffer, 0, this.buffer.length);
+  public void copyFrom(LXBuffer<int[]> that) {
+    System.arraycopy(that.getBuffer(), 0, this.buffer, 0, this.buffer.length);
   }
 
 }

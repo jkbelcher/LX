@@ -68,8 +68,9 @@ public class LXDmxBuffer implements LXBuffer<byte[]> {
     return this.buffer;
   }
 
-  public void copyFrom(LXDmxBuffer that) {
-    System.arraycopy(that.buffer, 0, this.buffer, 0, this.buffer.length);
+  @Override
+  public void copyFrom(LXBuffer<byte[]> that) {
+    System.arraycopy(that.getBuffer(), 0, this.buffer, 0, this.buffer.length);
   }
 
 }

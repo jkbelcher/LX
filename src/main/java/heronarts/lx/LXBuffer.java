@@ -46,6 +46,6 @@ public interface LXBuffer<T> {
   // TODO: remove copyTo? It is not used.
   // public LXBuffer<T> copyTo(LXBuffer<T> that);
 
-  // public void copyFrom(LXBuffer that);
+  public void copyFrom(LXBuffer<T> that);
 
 }
