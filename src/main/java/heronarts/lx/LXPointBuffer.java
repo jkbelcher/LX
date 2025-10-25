@@ -35,7 +35,7 @@ public class LXPointBuffer implements LXBuffer<int[]> {
   public LXPointBuffer() { }
 
   @Override
-  public void initialize(LXModel model) {
+  public void setModel(LXModel model) {
     if (this.buffer.length != model.size) {
       this.buffer = new int[model.size];
       Arrays.fill(this.buffer, DEFAULT_COLOR);
@@ -73,8 +73,8 @@ public class LXPointBuffer implements LXBuffer<int[]> {
     return this.buffer;
   }
 
-  @Override
-  public void copyFrom(int[] that) {
-    System.arraycopy(that, 0, this.buffer, 0, this.buffer.length);
+  public void copyFrom(LXPointBuffer that) {
+    System.arraycopy(that.buffer, 0, this.buffer, 0, this.buffer.length);
   }
+
 }

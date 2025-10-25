@@ -27,7 +27,7 @@ import heronarts.lx.structure.LXFixture;
 public interface LXBuffer<T> {
 
   /** Model has changed. Buffer should re-allocate to accommodate the new model size */
-  public void initialize(LXModel model);
+  public void setModel(LXModel model);
 
   public void clear(boolean startOfFrame);
 
@@ -46,8 +46,6 @@ public interface LXBuffer<T> {
   // TODO: remove copyTo? It is not used.
   // public LXBuffer<T> copyTo(LXBuffer<T> that);
 
-  public void copyFrom(T that);
-
-  public default void dispose() { }
+  // public void copyFrom(LXBuffer that);
 
 }
