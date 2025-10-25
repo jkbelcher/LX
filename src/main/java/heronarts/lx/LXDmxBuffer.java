@@ -3,9 +3,9 @@ package heronarts.lx;
 import heronarts.lx.model.LXModel;
 import heronarts.lx.structure.LXFixture;
 
-public class LXDmxBuffer implements LXBuffer<byte[]> {
+public class LXDmxBuffer implements LXBuffer<float[]> {
 
-  private byte[] buffer = new byte[0];
+  private float[] buffer = new float[0];
 
   private LXModel model;
 
@@ -18,20 +18,20 @@ public class LXDmxBuffer implements LXBuffer<byte[]> {
     // Pseudo code
     int dmxLength = 0;
     for (DmxModel dmxModel : model.dmxModels) { //
-      dmxLength += dmxModel.defaultBytes.length;
+      dmxLength += dmxModel.defaultBuffer.length;
     }
     if (this.buffer.length != dmxLength) {
-      this.buffer = new byte[dmxLength];
+      this.buffer = new float[dmxLength];
     }
     for (DmxModel dmxModel : model.dmxModels) {
-      System.arraycopy(dmxModel.defaultBytes, 0, this.buffer, dmxModel.getIndexBufferOffset(), dmxModel.defaultBytes.length);
+      System.arraycopy(dmxModel.defaultBuffer, 0, this.buffer, dmxModel.getIndexBufferOffset(), dmxModel.defaultBuffer.length);
     }
   }
 
   @Override
   public void clear(boolean startOfFrame) {
     for (DmxModel dmxModel : this.model.dmxModels) {
-      System.arraycopy(dmxModel.defaultBytes, 0, this.buffer, dmxModel.getIndexBufferOffset(), dmxModel.defaultBytes.length);
+      System.arraycopy(dmxModel.defaultBuffer, 0, this.buffer, dmxModel.getIndexBufferOffset(), dmxModel.defaultBuffer.length);
     }
   }
 
@@ -64,12 +64,12 @@ public class LXDmxBuffer implements LXBuffer<byte[]> {
   }
 
   @Override
-  public byte[] getBuffer() {
+  public float[] getBuffer() {
     return this.buffer;
   }
 
   @Override
-  public void copyFrom(LXBuffer<byte[]> that) {
+  public void copyFrom(LXBuffer<float[]> that) {
     System.arraycopy(that.getBuffer(), 0, this.buffer, 0, this.buffer.length);
   }
 

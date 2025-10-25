@@ -88,7 +88,7 @@ public class ModelBuffer {
   }
 
   /** Get the dmx buffer */
-  public byte[] getDmx() {
+  public float[] getDmx() {
     return this.dmxBuffer.getBuffer();
   }
 

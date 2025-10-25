@@ -37,7 +37,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   private ModelBuffer buffer = null;
 
   protected int[] colors = null;
-  protected byte[] dmx = null;
+  protected float[] dmx = null;
 
   private final List<LXLayer> mutableLayers = new ArrayList<LXLayer>();
   public final List<LXLayer> layers = Collections.unmodifiableList(mutableLayers);
@@ -82,7 +82,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
     return getBuffer().getColors();
   }
 
-  public byte[] getDmx() {
+  public float[] getDmx() {
     return getBuffer().getDmx();
   }
 
