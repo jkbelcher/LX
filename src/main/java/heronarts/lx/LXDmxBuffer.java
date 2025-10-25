@@ -46,7 +46,9 @@ public class LXDmxBuffer implements LXBuffer<byte[]> {
   @Override
   public void colorFixture(LXFixture fixture, int color) {
     // Color behavior varies by fixture type
-    fixture.color(this, color);
+    if (fixture instanceof DmxFixture dmxFixture) {
+      dmxFixture.setColor(this, color);
+    }
   }
 
   @Override
