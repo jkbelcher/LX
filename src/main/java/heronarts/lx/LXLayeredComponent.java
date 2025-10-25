@@ -37,6 +37,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   private ModelBuffer buffer = null;
 
   protected int[] colors = null;
+  protected byte[] dmx = null;
 
   private final List<LXLayer> mutableLayers = new ArrayList<LXLayer>();
   public final List<LXLayer> layers = Collections.unmodifiableList(mutableLayers);
@@ -68,6 +69,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
     if (buffer != null) {
       this.buffer = buffer;
       this.colors = buffer.getColors();
+      this.dmx = buffer.getDmx();
     }
     addArray("layer", this.layers);
   }
@@ -80,6 +82,10 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
     return getBuffer().getColors();
   }
 
+  public byte[] getDmx() {
+    return getBuffer().getDmx();
+  }
+
   protected LXLayeredComponent setBuffer(LXDeviceComponent component) {
     return setBuffer(component.getBuffer());
   }
@@ -87,6 +93,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
   public LXLayeredComponent setBuffer(ModelBuffer buffer) {
     this.buffer = buffer;
     this.colors = buffer.getColors();
+    this.dmx = buffer.getDmx();
     return this;
   }
 
@@ -101,6 +108,7 @@ public abstract class LXLayeredComponent extends LXModelComponent implements LXL
     // here on each pass of the loop. Better than subclasses having to call getColors()
     // all the time.
     this.colors = this.buffer.getColors();
+    this.dmx = this.buffer.getDmx();
 
     super.loop(deltaMs);
     onLoop(deltaMs);
