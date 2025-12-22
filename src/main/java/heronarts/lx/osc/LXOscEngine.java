@@ -318,37 +318,49 @@ public class LXOscEngine extends LXComponent {
     return this;
   }
 
-  public LXOscEngine sendMessage(String path, int value) {
+  public LXOscEngine sendMessage(String path) {
     if (this.engineTransmitter != null) {
-      this.engineTransmitter.sendMessage(path, value);
+      this.engineTransmitter.sendMessage(path);
     }
     for (LXOscConnection.Output output : this.outputs) {
       if (output.transmitter != null) {
-        output.transmitter.sendMessage(path, value);
+        output.transmitter.sendMessage(path);
       }
     }
     return this;
   }
 
-  public LXOscEngine sendMessage(String path, float value) {
+  public LXOscEngine sendMessage(String path, int ... values) {
     if (this.engineTransmitter != null) {
-      this.engineTransmitter.sendMessage(path, value);
+      this.engineTransmitter.sendMessage(path, values);
     }
     for (LXOscConnection.Output output : this.outputs) {
       if (output.transmitter != null) {
-        output.transmitter.sendMessage(path, value);
+        output.transmitter.sendMessage(path, values);
       }
     }
     return this;
   }
 
-  public LXOscEngine sendMessage(String path, String value) {
+  public LXOscEngine sendMessage(String path, float ... values) {
     if (this.engineTransmitter != null) {
-      this.engineTransmitter.sendMessage(path, value);
+      this.engineTransmitter.sendMessage(path, values);
     }
     for (LXOscConnection.Output output : this.outputs) {
       if (output.transmitter != null) {
-        output.transmitter.sendMessage(path, value);
+        output.transmitter.sendMessage(path, values);
+      }
+    }
+    return this;
+  }
+
+  public LXOscEngine sendMessage(String path, String ... values) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, values);
+    }
+    for (LXOscConnection.Output output : this.outputs) {
+      if (output.transmitter != null) {
+        output.transmitter.sendMessage(path, values);
       }
     }
     return this;
@@ -588,32 +600,49 @@ public class LXOscEngine extends LXComponent {
       _sendMessage(oscMessage);
     }
 
-    private void sendMessage(String address, int value) {
+    private void sendMessage(String address) {
       if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
-        oscInt.setValue(value);
+        _sendMessage(oscMessage);
+      }
+    }
+
+    private void sendMessage(String address, int ... values) {
+      if (isActive() && !isAddressFiltered(address)) {
+        oscMessage.clearArguments();
+        oscMessage.setAddressPattern(address);
+        oscInt.setValue(values[0]);
         oscMessage.add(oscInt);
+        for (int i = 1; i < values.length; ++i) {
+          oscMessage.add(new OscInt(values[i]));
+        }
         _sendMessage(oscMessage);
       }
     }
 
-    private void sendMessage(String address, float value) {
+    private void sendMessage(String address, float ... values) {
       if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
-        oscFloat.setValue(value);
+        oscFloat.setValue(values[0]);
         oscMessage.add(oscFloat);
+        for (int i = 1; i < values.length; ++i) {
+          oscMessage.add(new OscFloat(values[i]));
+        }
         _sendMessage(oscMessage);
       }
     }
 
-    private void sendMessage(String address, String value) {
+    private void sendMessage(String address, String ... values) {
       if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
         oscMessage.setAddressPattern(address);
-        oscString.setValue(value);
+        oscString.setValue(values[0]);
         oscMessage.add(oscString);
+        for (int i = 1; i < values.length; ++i) {
+          oscMessage.add(new OscString(values[i]));
+        }
         _sendMessage(oscMessage);
       }
     }
