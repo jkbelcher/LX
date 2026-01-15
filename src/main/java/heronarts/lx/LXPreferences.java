@@ -81,6 +81,10 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     new BooleanParameter("Help Messages", true)
     .setDescription("Whether to show contextual help messages in the status bar");
 
+  public final BooleanParameter floatingHelpMessages =
+    new BooleanParameter("Floating Help Messages", true)
+      .setDescription("Whether to show floating help messages on mouse hover");
+
   public final BooleanParameter schedulerEnabled =
     new BooleanParameter("Project Scheduler Enabed", false)
     .setDescription("Whether the project scheduler is enabled");
@@ -138,6 +142,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     this.uiZoom.addListener(this);
     this.uiTheme.addListener(this);
     this.showHelpMessages.addListener(this);
+    this.floatingHelpMessages.addListener(this);
     this.schedulerEnabled.addListener(this);
     this.showCpuLoad.addListener(this);
     this.autoReloadPackages.addListener(this);
@@ -246,6 +251,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   private static final String KEY_SUPPRESS_OUTPUT = "suppressOutput";
   private static final String KEY_OSC_QUERY = "oscQuery";
   private static final String KEY_SHOW_HELP_MESSAGES = "showHelpMessages";
+  private static final String KEY_FLOATING_HELP_MESSAGES = "floatingHelpMessages";
   private static final String KEY_SCHEDULER_ENABLED = "schedulerEnabled";
   private static final String KEY_SHOW_CPU_LOAD = "showCpuLoad";
   private static final String KEY_AUTO_RELOAD_PACKAGES = "autoReloadPackages";
@@ -280,6 +286,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     object.addProperty(KEY_SUPPRESS_OUTPUT, this.suppressOutput.isOn());
     object.addProperty(KEY_OSC_QUERY, this.oscQuery.isOn());
     object.addProperty(KEY_SHOW_HELP_MESSAGES, this.showHelpMessages.isOn());
+    object.addProperty(KEY_FLOATING_HELP_MESSAGES, this.floatingHelpMessages.isOn());
     object.addProperty(KEY_SCHEDULER_ENABLED, this.schedulerEnabled.isOn());
     object.addProperty(KEY_SHOW_CPU_LOAD, this.showCpuLoad.isOn());
     object.addProperty(KEY_AUTO_RELOAD_PACKAGES, this.autoReloadPackages.isOn());
@@ -297,6 +304,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     LXSerializable.Utils.loadBoolean(this.suppressOutput, object, KEY_SUPPRESS_OUTPUT);
     LXSerializable.Utils.loadBoolean(this.oscQuery, object, KEY_OSC_QUERY);
     LXSerializable.Utils.loadBoolean(this.showHelpMessages, object, KEY_SHOW_HELP_MESSAGES);
+    LXSerializable.Utils.loadBoolean(this.floatingHelpMessages, object, KEY_FLOATING_HELP_MESSAGES);
     LXSerializable.Utils.loadBoolean(this.schedulerEnabled, object, KEY_SCHEDULER_ENABLED);
     LXSerializable.Utils.loadBoolean(this.showCpuLoad, object, KEY_SHOW_CPU_LOAD);
     LXSerializable.Utils.loadBoolean(this.autoReloadPackages, object, KEY_AUTO_RELOAD_PACKAGES);
