@@ -94,6 +94,8 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   public final LXEngineUtilities utilities = new LXEngineUtilities();
 
+  public final LXLoopTask websocket;
+
   private Dispatch inputDispatch = null;
 
   private boolean inLoopTasks = false;
@@ -430,6 +432,21 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // OSC engine
     addChild("osc", this.osc = new LXOscEngine(lx));
     LX.initProfiler.log("Engine: Osc");
+
+    // Websocket engine (optional, from LXWeb)
+    LXLoopTask websocket = null;
+    try {
+      Class<?> cls = Class.forName("heronarts.lx.websocket.LXWebsocketEngine");
+      java.lang.reflect.Constructor<?> constructor = cls.getConstructor(LX.class, LXMixerEngine.class);
+      websocket = (LXLoopTask) constructor.newInstance(lx, this.mixer);
+      addChild("websocket", (LXComponent) websocket);
+      LX.initProfiler.log("Engine: Websocket");
+    } catch (ClassNotFoundException x) {
+      LX.log("LXWeb not found, websocket engine will not run");
+    } catch (Exception x) {
+      LX.error(x, "Failed to initialize LXWeb websocket engine");
+    }
+    this.websocket = websocket;
 
     // Register parameters
     addParameter("compositorMultithreaded", this.isCompositorMultithreaded);
@@ -1242,6 +1259,11 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     // All done running this pass of the engine!
     this.profiler.runNanos = System.nanoTime() - runStart;
 
+    // Service requests from the websocket engine
+    if (this.websocket != null) {
+      this.websocket.loop(deltaMs);
+    }
+
     // Debug trace logging
     if (this.logProfiler) {
       _logProfiler();
@@ -1444,6 +1466,9 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
 
   @Override
   public void dispose() {
+    if (this.websocket != null) {
+      ((LXComponent) this.websocket).dispose();
+    }
     this.midi.disposeSurfaces();
 
     // Clear the project content first, patterns/effects/modulators may depend upon plugins
