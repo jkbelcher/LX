@@ -28,6 +28,7 @@ public class ModelBuffer {
   private final LXPointBuffer pointsBuffer;
   private final LXDmxBuffer dmxBuffer;
 
+  private final boolean listenForModelChanges;
   private final LX.Listener modelListener = new LX.Listener() {
     @Override
     public void modelChanged(LX lx, LXModel model) {
@@ -36,7 +37,12 @@ public class ModelBuffer {
   };
 
   public ModelBuffer(LX lx) {
+    this(lx, true);
+  }
+
+  public ModelBuffer(LX lx, boolean listenForModelChanges) {
     this.lx = lx;
+    this.listenForModelChanges = listenForModelChanges;
 
     // Allocate buffer for LXPoints
     this.pointsBuffer = new LXPointBuffer();
@@ -46,10 +52,11 @@ public class ModelBuffer {
     this.dmxBuffer = new LXDmxBuffer();
     this.dmxBuffer.setModel(lx.model);
 
-    lx.addListener(this.modelListener);
+    if (listenForModelChanges) {
+      lx.addListener(this.modelListener);
+    }
   }
 
-  // TODO: should we avoid listening to lx.modelChanged for ModelBuffers that are owned by Frame?
   public void setModel(LXModel model) {
     this.pointsBuffer.setModel(model);
     this.dmxBuffer.setModel(model);
@@ -99,7 +106,9 @@ public class ModelBuffer {
   }
 
   public void dispose() {
-    this.lx.removeListener(this.modelListener);
+    if (this.listenForModelChanges) {
+      this.lx.removeListener(this.modelListener);
+    }
   }
 
 }

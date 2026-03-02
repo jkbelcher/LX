@@ -236,15 +236,14 @@ public class LXEngine extends LXComponent implements LXOscComponent, LXModulatio
     private boolean auxOn = false;
 
     public Frame(LX lx) {
-      this.main = new ModelBuffer(lx);
-      this.cue = new ModelBuffer(lx);
-      this.aux = new ModelBuffer(lx);
+      this.main = new ModelBuffer(lx, false);
+      this.cue = new ModelBuffer(lx, false);
+      this.aux = new ModelBuffer(lx, false);
       setModel(lx.getModel());
     }
 
     public void setModel(LXModel model) {
       this.model = model;
-      // TODO: maybe these three ModelBuffers should not also be listening to lx.modelChanged?
       this.main.setModel(model);
       this.cue.setModel(model);
       this.aux.setModel(model);
