@@ -30,7 +30,9 @@ import heronarts.lx.utils.LXUtils;
 @LXCategory(LXCategory.AUDIO)
 @LXModulator.Global("Band Filter")
 @LXModulator.Device("Band Filter")
-public class BandFilter extends LXModulator implements LXNormalizedParameter, LXOscComponent {
+public class BandFilter extends LXModulator implements LXNormalizedParameter, LXOscComponent, GraphicMeter.Processor {
+
+  private static final int NYQUIST_FREQ = 24000;
 
   /**
    * Gain of the meter, in decibels
@@ -87,7 +89,7 @@ public class BandFilter extends LXModulator implements LXNormalizedParameter, LX
 
   private double averageOctave = 1;
 
-  private float averageRaw = 0;
+  private double averageRaw = 0;
 
   protected double averageNorm = 0;
 
@@ -110,15 +112,15 @@ public class BandFilter extends LXModulator implements LXNormalizedParameter, LX
   public BandFilter(String label, GraphicMeter meter) {
     super(label);
 
-    this.impl = new LXMeterImpl(meter.numBands, meter.fft.getBandOctaveRatio());
+    this.impl = new LXMeterImpl(meter.numBands);
     this.meter = meter;
+    this.meter.addProcessor(this);
 
-    final int nyquist = meter.fft.getSampleRate() / 2;
-    this.minFreq = new BoundedParameter("Min Freq", 60, 0, nyquist)
+    this.minFreq = new BoundedParameter("Min Freq", 60, 0, NYQUIST_FREQ)
       .setDescription("Minimum frequency the gate responds to")
       .setExponent(4)
       .setUnits(LXParameter.Units.HERTZ);
-    this.maxFreq = new BoundedParameter("Max Freq", 120, 0, nyquist)
+    this.maxFreq = new BoundedParameter("Max Freq", 120, 0, NYQUIST_FREQ)
       .setDescription("Maximum frequency the gate responds to")
       .setExponent(4)
       .setUnits(LXParameter.Units.HERTZ);
@@ -174,30 +176,42 @@ public class BandFilter extends LXModulator implements LXNormalizedParameter, LX
     this.averageOctave = Math.log(averageFreq / FourierTransform.BASE_BAND_HZ) / FourierTransform.LOG_2;
   }
 
-  @Override
-  protected double computeValue(double deltaMs) {
-    float attackGain = (float) Math.exp(-deltaMs / this.attack.getValue());
-    float releaseGain = (float) Math.exp(-deltaMs / this.release.getValue());
-    double rangeValue = this.range.getValue();
-    double gainValue = this.gain.getValue();
-    double slopeValue = this.slope.getValue();
+  public void onMeterAudioFrame(GraphicMeter meter) {
+    if (!isRunning()) {
+      return;
+    }
 
-    // Computes all the underlying bands
+    final double slope = this.slope.getValue();
+    final double gain = this.gain.getValue();
+    final double range = this.range.getValue();
+
+    final double attackGain = Math.exp(-meter.getBufferSize() / (this.attack.getValue() * meter.getSampleRate() * .001));
+    final double releaseGain = Math.exp(-meter.getBufferSize() / (this.release.getValue() * meter.getSampleRate() * .001));
     this.impl.compute(
-      this.meter.fft,
+      meter.fft,
       attackGain,
       releaseGain,
-      gainValue,
-      rangeValue,
-      slopeValue
+      gain,
+      range,
+      slope
     );
 
-    float newAverage = this.meter.fft.getAverage(this.minFreq.getValuef(), this.maxFreq.getValuef()) / this.meter.fft.getSize();
-    float averageGain = (newAverage >= this.averageRaw) ? attackGain : releaseGain;
+    final float newAverage = meter.fft.getAverage(this.minFreq.getValuef(), this.maxFreq.getValuef()) / this.meter.fft.getSize();
+    final double averageGain =  (newAverage >= this.averageRaw) ? attackGain : releaseGain;
     this.averageRaw = newAverage + averageGain * (this.averageRaw - newAverage);
-    double averageDb = 20 * Math.log(this.averageRaw) / DecibelMeter.LOG_10 + gainValue + slopeValue * this.averageOctave;
-    this.averageNorm = 1 + averageDb / rangeValue;
 
+    final double averageDb = DecibelMeter.amplitudeToDecibels(this.averageRaw) + gain + slope * this.averageOctave;
+    this.averageNorm = 1 + averageDb / range;
+  }
+
+  public void onMeterStop(GraphicMeter meter) {
+    this.impl.onStop();
+    this.averageRaw = 0;
+    this.averageNorm = 0;
+  }
+
+  @Override
+  protected double computeValue(double deltaMs) {
     return LXUtils.constrain(this.averageNorm, 0, 1);
   }
 
@@ -209,6 +223,12 @@ public class BandFilter extends LXModulator implements LXNormalizedParameter, LX
   @Override
   public double getNormalized() {
     return getValue();
+  }
+
+  @Override
+  public void dispose() {
+    this.meter.removeProcessor(this);
+    super.dispose();
   }
 
 }

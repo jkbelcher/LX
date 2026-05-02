@@ -70,7 +70,7 @@ import com.google.gson.stream.JsonWriter;
  */
 public class LX {
 
-  public static final String VERSION = "1.1.1-TE.2-SNAPSHOT";
+  public static final String VERSION = "1.2.2-TE.1-SNAPSHOT";
 
   public static class InstantiationException extends Exception {
 
@@ -181,6 +181,7 @@ public class LX {
     public long autosaveIntervalMs = 15000;
     public boolean zeroconf = false;
     public String zeroconfServiceName = "LX";
+    public boolean zeroconfForce = false;
     public LXEngine.ThreadMode threadMode = LXEngine.ThreadMode.SCHEDULED_EXECUTOR_SERVICE;
     public int engineThreadPriority = Thread.MAX_PRIORITY;
     public String mediaPath = ".";
@@ -189,6 +190,7 @@ public class LX {
     public List<String> enabledPlugins = new ArrayList<String>();
     public List<String> classpathPlugins = new ArrayList<String>();
     public OutputMode outputMode = OutputMode.PROJECT;
+    public float scrollMultiplier = 1f;
   }
 
   public static enum Media {
