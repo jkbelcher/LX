@@ -96,6 +96,14 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
 
   private final AddBlend addBlend;
 
+  private static final double PERFORMANCE_WARNING_TIMEOUT = 1000;
+
+  private double performanceWarningMs = 0;
+
+  public final BooleanParameter performanceWarning =
+    new BooleanParameter("Warning", false)
+    .setDescription("Set to true if there is excessive CPU usage");
+
   public final DiscreteParameter focusedChannel =
     new DiscreteParameter("Channel", 1)
     .setDescription("Which channel is currently focused in the UI");
@@ -1069,7 +1077,11 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
       } else {
         channel.performanceWarningFrameCount = 0;
       }
-      channel.performanceWarning.setValue(channel.performanceWarningFrameCount >= 5);
+      final boolean performanceWarning = channel.performanceWarningFrameCount >= 5;
+      channel.performanceWarning.setValue(performanceWarning);
+      if (performanceWarning) {
+        this.performanceWarningMs = PERFORMANCE_WARNING_TIMEOUT;
+      }
     }
 
     // Suppress CPU blending in experimental GPU mode
@@ -1254,6 +1266,14 @@ public class LXMixerEngine extends LXComponent implements LXOscComponent {
     render.setAuxOn(auxBusActive);
 
     } // End suppression of CPU blending
+
+    // Set top-level performance warning flag
+    if (this.performanceWarningMs > 0) {
+      this.performanceWarning.setValue(true);
+      this.performanceWarningMs -= deltaMs;
+    } else {
+      this.performanceWarning.setValue(false);
+    }
 
     // Experimental GPU mixing mode
     if (this.lx.engine.renderMode.gpu) {

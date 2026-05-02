@@ -18,6 +18,11 @@
 
 package heronarts.lx.audio;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import heronarts.lx.LX;
 import heronarts.lx.parameter.CompoundParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.NormalizedParameter;
@@ -33,7 +38,14 @@ import heronarts.lx.parameter.NormalizedParameter;
  */
 public class GraphicMeter extends DecibelMeter {
 
+  public interface Processor {
+    public void onMeterAudioFrame(GraphicMeter meter);
+    public void onMeterStop(GraphicMeter meter);
+  }
+
   private final LXMeterImpl impl;
+
+  private final List<Processor> processors = new CopyOnWriteArrayList<>();
 
   /**
    * dB/octave slope applied to the equalizer
@@ -49,8 +61,6 @@ public class GraphicMeter extends DecibelMeter {
   public final int numBands;
 
   public final FourierTransform fft;
-
-  private final float[] sampleBuffer;
 
   public final NormalizedParameter[] bands;
 
@@ -97,10 +107,8 @@ public class GraphicMeter extends DecibelMeter {
   public GraphicMeter(String label, LXAudioBuffer buffer, int numBands) {
     super(label, buffer);
     addParameter("slope", this.slope);
-    this.sampleBuffer = new float[buffer.bufferSize()];
-    this.fft = new FourierTransform(buffer.bufferSize(), buffer.sampleRate());
-    this.fft.setNumBands(this.numBands = numBands);
-    this.impl = new LXMeterImpl(this.numBands, this.fft.getBandOctaveRatio());
+    this.fft = new FourierTransform(buffer.bufferSize(), this.numBands = numBands);
+    this.impl = new LXMeterImpl(this.numBands);
     this.bands = this.impl.bands;
     int i = 1;
     for (NormalizedParameter band : this.bands) {
@@ -108,33 +116,47 @@ public class GraphicMeter extends DecibelMeter {
     }
   }
 
-  @Override
-  protected double computeValue(double deltaMs) {
-    double result = super.computeValue(deltaMs);
-    this.buffer.getSamples(this.sampleBuffer);
-    this.fft.compute(this.sampleBuffer);
+  public final void addProcessor(Processor processor) {
+    Objects.requireNonNull(processor, "May not add null GraphicMeter.Processor");
+    if (this.processors.contains(processor)) {
+      throw new IllegalStateException("May not add duplicate GraphicMeter.Processor: " + processor);
+    }
+    this.processors.add(processor);
+  }
 
+  public final void removeProcessor(Processor processor) {
+    if (!this.processors.contains(processor)) {
+      throw new IllegalStateException("May not remove non-registered GraphicMeter.Processor: " + processor);
+    }
+    this.processors.remove(processor);
+  }
+
+  @Override
+  protected void onAudioFrame() {
+    if (!isRunning()) {
+      return;
+    }
+    super.onAudioFrame();
     this.impl.compute(
-      this.fft,
-      this.attackGain,
-      this.releaseGain,
+      this.fft.compute(this.buffer),
+      this.attackGain, // set by DecibelMeter.onAudioFrame()
+      this.releaseGain, // set by DecibelMeter.onAudioFrame()
       this.gain.getValue(),
       this.range.getValue(),
       this.slope.getValue()
     );
-
-    return result;
+    for (Processor processor : this.processors) {
+      processor.onMeterAudioFrame(this);
+    }
   }
 
-  /**
-   * Returns a snapshot of the last raw audio sample buffer frame that was used to compute
-   * this meter. Note that this is copy of the audio buffer local to the LX thread and this particular
-   * meter. The buffer is only updated when the meter is running, once per LX engine loop.
-   *
-   * @return Raw audio sample buffer used to compute this meter
-   */
-  public float[] getSamples() {
-    return this.sampleBuffer;
+  @Override
+  protected void onStop() {
+    super.onStop();
+    this.impl.onStop();
+    for (Processor processor : this.processors) {
+      processor.onMeterStop(this);
+    }
   }
 
   /**
@@ -229,6 +251,13 @@ public class GraphicMeter extends DecibelMeter {
    */
   public float getAveragef(int minBand, int avgBands) {
     return (float) getAverage(minBand, avgBands);
+  }
+
+  @Override
+  public void dispose() {
+    super.dispose();
+    this.processors.forEach(processor -> LX.warning("Stranded GraphicMeter.Processor: " + processor));
+    this.processors.clear();
   }
 
 }

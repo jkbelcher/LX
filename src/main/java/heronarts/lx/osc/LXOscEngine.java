@@ -26,6 +26,7 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -285,7 +286,7 @@ public class LXOscEngine extends LXComponent {
   }
 
   public LXOscEngine addIOListener(IOListener listener) {
-    Objects.requireNonNull("May not add null IOListener");
+    Objects.requireNonNull(listener, "May not add null IOListener");
     if (this.ioListeners.contains(listener)) {
       throw new IllegalStateException(
         "Cannot add duplicate LXOscEngine.IOListener: "
@@ -306,7 +307,7 @@ public class LXOscEngine extends LXComponent {
   }
 
   public LXOscEngine addListener(LXOscListener listener) {
-    Objects.requireNonNull("May not add null LXOscListener");
+    Objects.requireNonNull(listener, "May not add null LXOscListener");
     if (this.listeners.contains(listener)) {
       throw new IllegalStateException(
         "Cannot add duplicate LXOscEngine.LXOscListener: "
@@ -414,6 +415,30 @@ public class LXOscEngine extends LXComponent {
         output.transmitter.sendMessage(path, value);
       }
     }
+  }
+
+  public LXOscEngine sendMessage(String path, Object ... args) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, args);
+    }
+    for (LXOscConnection.Output output : this.outputs) {
+      if (output.transmitter != null) {
+        output.transmitter.sendMessage(path, args);
+      }
+    }
+    return this;
+  }
+
+  public LXOscEngine sendMessage(String path, OscArgument ... args) {
+    if (this.engineTransmitter != null) {
+      this.engineTransmitter.sendMessage(path, args);
+    }
+    for (LXOscConnection.Output output : this.outputs) {
+      if (output.transmitter != null) {
+        output.transmitter.sendMessage(path, args);
+      }
+    }
+    return this;
   }
 
   public LXOscEngine sendParameter(LXParameter parameter) {
@@ -716,6 +741,37 @@ public class LXOscEngine extends LXComponent {
       _sendMessage(oscMessage);
     }
 
+    private void sendMessage(String address, Object ... args) {
+      if (isActive() && !isAddressFiltered(address)) {
+        oscMessage.clearArguments();
+        oscMessage.setAddressPattern(address);
+        for (Object arg : args) {
+          oscMessage.add(switch (arg) {
+            case OscArgument a -> a;
+            case Integer i -> new OscInt(i);
+            case Long l -> new OscLong(l);
+            case Float f -> new OscFloat(f);
+            case Double d -> new OscDouble(d);
+            case String s -> new OscString(s);
+            case Boolean b -> b.booleanValue() ? new OscTrue() : new OscFalse();
+            default -> throw new IllegalArgumentException("Invalid OSC argument: " + arg);
+          });
+        }
+        _sendMessage(oscMessage);
+      }
+    }
+
+    private void sendMessage(String address, OscArgument ... args) {
+      if (isActive() && !isAddressFiltered(address)) {
+        oscMessage.clearArguments();
+        oscMessage.setAddressPattern(address);
+        for (OscArgument arg : args) {
+          oscMessage.add(arg);
+        }
+        _sendMessage(oscMessage);
+      }
+    }
+
     private void sendMessage(String address, int value) {
       if (isActive() && !isAddressFiltered(address)) {
         oscMessage.clearArguments();
@@ -770,8 +826,7 @@ public class LXOscEngine extends LXComponent {
 
     private final AtomicBoolean hasMessages = new AtomicBoolean(false);
 
-    private final List<OscMessage> threadSafeEventQueue = Collections
-      .synchronizedList(new ArrayList<OscMessage>());
+    private final ArrayDeque<OscMessage> threadSafeEventQueue = new ArrayDeque<OscMessage>(256);
 
     private final List<OscMessage> engineThreadEventQueue = new ArrayList<OscMessage>();
 
@@ -782,7 +837,7 @@ public class LXOscEngine extends LXComponent {
 
     private BooleanParameter log;
     private TriggerParameter activity;
-    private LXOscConnection connection;
+    private LXOscConnection.Input connection;
 
     private Receiver(int port, InetAddress address, int bufferSize)
       throws SocketException {
@@ -804,7 +859,7 @@ public class LXOscEngine extends LXComponent {
       this.thread.start();
     }
 
-    void setConnection(LXOscConnection connection) {
+    void setConnection(LXOscConnection.Input connection) {
       this.connection = connection;
       setLog(connection.log);
       setActivity(connection.activity);
@@ -821,7 +876,7 @@ public class LXOscEngine extends LXComponent {
     }
 
     public Receiver addListener(LXOscListener listener) {
-      Objects.requireNonNull("May not add null LXOscListener");
+      Objects.requireNonNull(listener,"May not add null LXOscListener");
       if (this.listeners.contains(listener)) {
         throw new IllegalStateException("Cannot add duplicate LXOscEngine.Receiver.LXOscListener: " + listener);
       }
@@ -853,15 +908,22 @@ public class LXOscEngine extends LXComponent {
             socket.receive(packet);
             try {
               // Parse the OSC packet
-              OscPacket oscPacket = OscPacket.parse(packet);
+              final OscPacket oscPacket = OscPacket.parse(packet);
+              final int delayMs = ((connection != null) && connection.hasDelay.isOn()) ? connection.delayMs.getValuei() : 0;
 
               // Add all messages in the packet to the queue
-              if (oscPacket instanceof OscMessage) {
-                threadSafeEventQueue.add((OscMessage) oscPacket);
+              if (oscPacket instanceof OscMessage oscMessage) {
+                oscMessage.nanoTime += delayMs * 1000000;
+                synchronized (threadSafeEventQueue) {
+                  threadSafeEventQueue.add(oscMessage);
+                }
                 hasMessages.set(true);
-              } else if (oscPacket instanceof OscBundle) {
-                for (OscMessage message : (OscBundle) oscPacket) {
-                  threadSafeEventQueue.add(message);
+              } else if (oscPacket instanceof OscBundle oscBundle) {
+                synchronized (threadSafeEventQueue) {
+                  for (OscMessage message : oscBundle) {
+                    message.nanoTime += delayMs * 1000000;
+                    threadSafeEventQueue.add(message);
+                  }
                 }
                 hasMessages.set(true);
               }
@@ -882,10 +944,19 @@ public class LXOscEngine extends LXComponent {
 
     private void dispatch() {
       if (this.hasMessages.compareAndSet(true, false)) {
+        final long now = System.nanoTime();
         this.engineThreadEventQueue.clear();
         synchronized (this.threadSafeEventQueue) {
-          this.engineThreadEventQueue.addAll(this.threadSafeEventQueue);
-          this.threadSafeEventQueue.clear();
+          OscMessage message;
+          while ((message = this.threadSafeEventQueue.peekFirst()) != null) {
+            if (now < message.nanoTime) {
+              // There are still messages that need processing...
+              this.hasMessages.set(true);
+              break;
+            }
+            this.engineThreadEventQueue.add(message);
+            this.threadSafeEventQueue.removeFirst();
+          }
         }
         // TODO(mcslee): do we want to handle NTP timetags?
 
@@ -1258,7 +1329,7 @@ public class LXOscEngine extends LXComponent {
   @Override
   public void dispose() {
     super.dispose();
-    this.listeners.forEach(listener -> LX.warning("Stranged LXOscEngine.Listener: " + listener));
+    this.listeners.forEach(listener -> LX.warning("Stranded LXOscEngine.Listener: " + listener));
     this.listeners.clear();
     this.messageListeners.forEach(listener -> LX.warning("Stranded LXOscEngine.MessageListener: " + listener));
     this.messageListeners.clear();

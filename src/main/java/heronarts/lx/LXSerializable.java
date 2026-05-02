@@ -35,6 +35,7 @@ import heronarts.lx.parameter.FunctionalParameter;
 import heronarts.lx.parameter.IEnumParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.StringParameter;
+import heronarts.lx.parameter.TriggerParameter;
 
 /**
  * Interface for any object that may be stored and loaded from a serialized file using
@@ -107,6 +108,8 @@ public interface LXSerializable {
     public static void saveParameter(LXParameter parameter, JsonObject obj, String path) {
       if (parameter instanceof StringParameter) {
         obj.addProperty(path, ((StringParameter) parameter).getString());
+      } else if (parameter instanceof TriggerParameter) {
+        obj.addProperty(path, false);
       } else if (parameter instanceof BooleanParameter) {
         obj.addProperty(path, ((BooleanParameter) parameter).isOn());
       } else if (parameter instanceof IEnumParameter<?> enumParameter) {
@@ -127,6 +130,15 @@ public interface LXSerializable {
         // Do not write FunctionalParamters into saved files
       } else {
         obj.addProperty(path, parameter.getBaseValue());
+      }
+    }
+
+    public static void loadChild(LXComponent child, JsonObject obj, String path) {
+      if (obj.has(LXComponent.KEY_CHILDREN)) {
+        final JsonObject children = obj.getAsJsonObject(LXComponent.KEY_CHILDREN);
+        if (children.has(path)) {
+          child.load(child.getLX(), children.getAsJsonObject(path));
+        }
       }
     }
 

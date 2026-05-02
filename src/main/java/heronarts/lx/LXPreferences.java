@@ -22,13 +22,17 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonWriter;
 
 import heronarts.lx.parameter.BooleanParameter;
+import heronarts.lx.parameter.BoundedParameter;
 import heronarts.lx.parameter.DiscreteParameter;
 import heronarts.lx.parameter.LXParameter;
 import heronarts.lx.parameter.LXParameterListener;
@@ -63,6 +67,10 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     new BooleanParameter("Suppress Live Output", false)
     .setDescription("Suppresses network output for local development");
 
+  public final BooleanParameter oscQuery =
+    new BooleanParameter("Enable OSCQuery / Zeroconf", false)
+    .setDescription("Enable OSC discovery with OSCQuery and Zeroconf");
+
   public final DiscreteParameter uiZoom =
     new DiscreteParameter("UI Scale", 100, 50, 201)
     .setDescription("Percentage by which the UI should be scaled")
@@ -89,8 +97,16 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     new StringParameter("UI Theme", null)
     .setDescription("Which UI theme is used");
 
+  public final BoundedParameter scrollSensitivity =
+    new BoundedParameter("Scroll Sensitivity", 1, .1, 100)
+    .setDescription("Scrolling sensitivity");
+
   private String projectFileName = null;
   private String scheduleFileName = null;
+
+  private static final int MAX_RECENT_PROJECTS = 12;
+
+  public final List<String> recentProjects = new ArrayList<>(MAX_RECENT_PROJECTS);
 
   private int windowWidth = -1;
   private int windowHeight = -1;
@@ -118,12 +134,14 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     this.focusActivePattern.addListener(this);
     this.sendCueToOutput.addListener(this);
     this.suppressOutput.addListener(this);
+    this.oscQuery.addListener(this);
     this.uiZoom.addListener(this);
     this.uiTheme.addListener(this);
     this.showHelpMessages.addListener(this);
     this.schedulerEnabled.addListener(this);
     this.showCpuLoad.addListener(this);
     this.autoReloadPackages.addListener(this);
+    this.scrollSensitivity.addListener(this);
   }
 
   public void setLX(LX lx) {
@@ -141,9 +159,13 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     if (this.lx == null) {
       throw new IllegalStateException("LXPreferences.onParameterChanged() invoked before LX instance was set");
     }
+    if ((p == this.oscQuery) && !this.lx.flags.zeroconfForce) {
+      this.lx.flags.zeroconf = this.oscQuery.isOn();
+    }
     this.lx.flags.focusChannelOnCue = this.focusChannelOnCue.isOn();
     this.lx.flags.focusActivePattern = this.focusActivePattern.isOn();
     this.lx.flags.sendCueToOutput = this.sendCueToOutput.isOn();
+    this.lx.flags.scrollMultiplier = this.scrollSensitivity.getValuef();
     save();
   }
 
@@ -186,6 +208,11 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   protected void setProject(File project) {
     if (project != null) {
       this.projectFileName = this.lx.getMediaPath(LX.Media.PROJECTS, project);
+      this.recentProjects.remove(this.projectFileName);
+      while (this.recentProjects.size() >= MAX_RECENT_PROJECTS) {
+        this.recentProjects.remove(this.recentProjects.size()-1);
+      }
+      this.recentProjects.add(0, this.projectFileName);
     } else {
       this.projectFileName = null;
     }
@@ -205,6 +232,7 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   private static final String KEY_EULA_ACCEPTED = "eulaAccepted";
   private static final String KEY_PROJECT_FILE_NAME = "projectFileName";
   private static final String KEY_SCHEDULE_FILE_NAME = "scheduleFileName";
+  private static final String KEY_RECENT_PROJECTS = "recentProjects";
   private static final String KEY_WINDOW_WIDTH = "windowWidth";
   private static final String KEY_WINDOW_WIDTH_LEGACY = "windwWidth";
   private static final String KEY_WINDOW_HEIGHT = "windowHeight";
@@ -216,10 +244,12 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
   private static final String KEY_FOCUS_ACTIVE_PATTERN = "focusActivePattern";
   private static final String KEY_SEND_CUE_TO_OUTPUT = "sendCueToOutput";
   private static final String KEY_SUPPRESS_OUTPUT = "suppressOutput";
+  private static final String KEY_OSC_QUERY = "oscQuery";
   private static final String KEY_SHOW_HELP_MESSAGES = "showHelpMessages";
   private static final String KEY_SCHEDULER_ENABLED = "schedulerEnabled";
   private static final String KEY_SHOW_CPU_LOAD = "showCpuLoad";
   private static final String KEY_AUTO_RELOAD_PACKAGES = "autoReloadPackages";
+  private static final String KEY_SCROLL_SENSITIVITY = "scrollSensitivity";
   private static final String KEY_REGISTRY = "registry";
 
 
@@ -232,6 +262,11 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     if (this.scheduleFileName != null) {
       object.addProperty(KEY_SCHEDULE_FILE_NAME, this.scheduleFileName);
     }
+    final JsonArray recentProjectsArr = new JsonArray();
+    for (String recentProject : this.recentProjects) {
+      recentProjectsArr.add(recentProject);
+    }
+    object.add(KEY_RECENT_PROJECTS, recentProjectsArr);
     object.addProperty(KEY_EULA_ACCEPTED, this.eulaAccepted.isOn());
     object.addProperty(KEY_WINDOW_WIDTH, this.windowWidth);
     object.addProperty(KEY_WINDOW_HEIGHT, this.windowHeight);
@@ -243,10 +278,12 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     object.addProperty(KEY_FOCUS_ACTIVE_PATTERN, this.focusActivePattern.isOn());
     object.addProperty(KEY_SEND_CUE_TO_OUTPUT, this.sendCueToOutput.isOn());
     object.addProperty(KEY_SUPPRESS_OUTPUT, this.suppressOutput.isOn());
+    object.addProperty(KEY_OSC_QUERY, this.oscQuery.isOn());
     object.addProperty(KEY_SHOW_HELP_MESSAGES, this.showHelpMessages.isOn());
     object.addProperty(KEY_SCHEDULER_ENABLED, this.schedulerEnabled.isOn());
     object.addProperty(KEY_SHOW_CPU_LOAD, this.showCpuLoad.isOn());
     object.addProperty(KEY_AUTO_RELOAD_PACKAGES, this.autoReloadPackages.isOn());
+    object.addProperty(KEY_SCROLL_SENSITIVITY, this.scrollSensitivity.getValue());
 
     object.add(KEY_REGISTRY, LXSerializable.Utils.toObject(this.lx, this.lx.registry));
   }
@@ -258,12 +295,14 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
     LXSerializable.Utils.loadBoolean(this.focusActivePattern, object, KEY_FOCUS_ACTIVE_PATTERN);
     LXSerializable.Utils.loadBoolean(this.sendCueToOutput, object, KEY_SEND_CUE_TO_OUTPUT);
     LXSerializable.Utils.loadBoolean(this.suppressOutput, object, KEY_SUPPRESS_OUTPUT);
+    LXSerializable.Utils.loadBoolean(this.oscQuery, object, KEY_OSC_QUERY);
     LXSerializable.Utils.loadBoolean(this.showHelpMessages, object, KEY_SHOW_HELP_MESSAGES);
     LXSerializable.Utils.loadBoolean(this.schedulerEnabled, object, KEY_SCHEDULER_ENABLED);
     LXSerializable.Utils.loadBoolean(this.showCpuLoad, object, KEY_SHOW_CPU_LOAD);
     LXSerializable.Utils.loadBoolean(this.autoReloadPackages, object, KEY_AUTO_RELOAD_PACKAGES);
     LXSerializable.Utils.loadInt(this.uiZoom, object, KEY_UI_ZOOM);
     LXSerializable.Utils.loadString(this.uiTheme, object, KEY_UI_THEME);
+    LXSerializable.Utils.loadDouble(this.scrollSensitivity, object, KEY_SCROLL_SENSITIVITY);
     loadWindowSettings(object);
     if (object.has(KEY_PROJECT_FILE_NAME)) {
       this.projectFileName = object.get(KEY_PROJECT_FILE_NAME).getAsString();
@@ -274,6 +313,13 @@ public class LXPreferences implements LXSerializable, LXParameterListener {
       this.scheduleFileName = object.get(KEY_SCHEDULE_FILE_NAME).getAsString();
     } else {
       this.scheduleFileName = null;
+    }
+    if (object.has(KEY_RECENT_PROJECTS)) {
+      final JsonArray recentProjectsArr = object.getAsJsonArray(KEY_RECENT_PROJECTS);
+      this.recentProjects.clear();
+      for (int i = 0; i < recentProjectsArr.size(); ++i) {
+        this.recentProjects.add(recentProjectsArr.get(i).getAsString());
+      }
     }
     LXSerializable.Utils.loadObject(this.lx, this.lx.registry, object, KEY_REGISTRY);
   }
