@@ -310,6 +310,8 @@ public class LXModel extends LXNormalizationBounds implements LXSerializable {
   private final Map<String, List<LXModel>> subDict =
     new HashMap<String, List<LXModel>>();
 
+  public final List<DmxModel> dmxModels = new ArrayList<>();
+
   final List<LXView> derivedViews = new ArrayList<LXView>();
 
   /**

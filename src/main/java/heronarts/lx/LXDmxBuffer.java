@@ -1,6 +1,8 @@
 package heronarts.lx;
 
+import heronarts.lx.model.DmxModel;
 import heronarts.lx.model.LXModel;
+import heronarts.lx.structure.DmxFixture;
 import heronarts.lx.structure.LXFixture;
 
 public class LXDmxBuffer implements LXBuffer<float[]> {
